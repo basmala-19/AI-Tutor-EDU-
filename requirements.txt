@@ -1,0 +1,23 @@
+# Layer 1: PDF fingerprinting
+pymupdf
+
+# Layer 2: Born-digital parser (downloads ~1 GB model on first run)
+docling
+
+# Layer 3: Complex-layout / VLM fallback (free tier, requires API key from cloud.llamaindex.ai)
+llama-parse
+
+# Schema validation
+pydantic>=2.0
+
+# ParseBench dataset download
+huggingface_hub
+
+# Testing
+pytest
+
+# Optional: local embedding (no OpenAI / Cohere API required)
+sentence-transformers
+
+# Optional: local vector store
+chromadb
