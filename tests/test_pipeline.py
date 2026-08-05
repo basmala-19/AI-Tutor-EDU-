@@ -24,6 +24,7 @@ from educational.rule_based_parser import parse_markdown_to_education
 from chunking.chunker import chunk_educational_document
 from evaluation.reports import build_quality_report
 from schema.models import EducationalDocument
+from evaluation.metrics import page_coverage
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +205,8 @@ class TestQualityReportInPipeline:
             "metadata_completeness",
             "reading_order",
             "ocr_confidence",
+            "page_coverage",
+            "structured_table_rows",
         }
         assert expected.issubset(quality.keys()), (
             f"Missing metrics: {expected - set(quality.keys())}"
@@ -221,6 +224,10 @@ class TestQualityReportInPipeline:
             assert "detail" in result and result["detail"], (
                 f"Metric '{name}' missing or empty 'detail'"
             )
+
+    def test_page_coverage_flags_a_missing_source_page(self, edoc):
+        result = page_coverage(edoc, expected_page_count=2)
+        assert result["status"] == "FAIL"
 
     def test_clean_document_passes_all(self, quality):
         failures = {k: v for k, v in quality.items() if v["status"] == "FAIL"}
@@ -301,7 +308,7 @@ class TestEndToEnd:
         quality = build_quality_report(markdown, edoc)
 
         assert len(edoc.chapters) > 0
-        assert len(quality) == 6
+        assert len(quality) == 8
         for v in quality.values():
             assert v["status"] in ("PASS", "FAIL")
 

@@ -95,7 +95,7 @@ def run_pipeline(
     images_by_page = extract_images_from_pdf(file_path)
     attach_extracted_images(edoc, images_by_page, parser=selected_parser.name)
 
-    quality_report = build_quality_report(markdown, edoc)
+    quality_report = build_quality_report(markdown, edoc, expected_page_count=probe.num_pages)
 
     result: dict = {
         "probe": asdict(probe),
@@ -105,6 +105,8 @@ def run_pipeline(
         "educational_document": json.loads(edoc.model_dump_json(exclude_none=True)),
         "quality_report": quality_report,
     }
+    if hasattr(selected_parser, "last_page_markers"):
+        result["page_markers"] = selected_parser.last_page_markers
 
     if include_chunks:
         from chunking.chunker import chunk_educational_document
@@ -141,6 +143,10 @@ if __name__ == "__main__":
         print(f"  - {attempt['parser']}: {attempt['status']}{suffix}")
     print(f"Language    : {res['language']}")
     print(f"Chapters    : {len(res['educational_document']['chapters'])}")
+    if "page_markers" in res:
+        markers = res["page_markers"]
+        preview = markers if len(markers) <= 20 else markers[:10] + ["..."] + markers[-3:]
+        print(f"Page markers: {preview}")
     print("Quality     :")
     for metric, val in res["quality_report"].items():
         icon = "+" if val["status"] == "PASS" else "!"

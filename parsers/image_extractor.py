@@ -104,16 +104,23 @@ def attach_extracted_images(
             continue
 
         for image_path in image_paths:
-            lesson.elements.append(
-                Element(
-                    type=ElementType.IMAGE,
-                    text=f"[Image: {Path(image_path).name}]",
-                    metadata=ElementMetadata(
-                        page=page,
-                        chapter=chapter_title,
-                        lesson=lesson_title,
-                        parser=parser,
-                        extra={"image_path": image_path, "association": association},
-                    ),
-                )
+            image = Element(
+                type=ElementType.IMAGE,
+                text=f"[Image: {Path(image_path).name}]",
+                metadata=ElementMetadata(
+                    page=page,
+                    chapter=chapter_title,
+                    lesson=lesson_title,
+                    parser=parser,
+                    extra={"image_path": image_path, "association": association},
+                ),
             )
+            # Appending all extracted figures after textual parsing makes a
+            # multi-page lesson appear as ``page 29 -> page 1`` in the flat
+            # document order.  Insert each visual at its page position.
+            insert_at = len(lesson.elements)
+            for index, existing in enumerate(lesson.elements):
+                if existing.metadata.page > page:
+                    insert_at = index
+                    break
+            lesson.elements.insert(insert_at, image)

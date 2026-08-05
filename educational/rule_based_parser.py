@@ -29,6 +29,7 @@ from schema.models import (
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 IMAGE_RE = re.compile(r"^!\[(?P<alt>.*?)\]\((?P<path>[^)]+)\)\s*$")
+IMAGE_PLACEHOLDER_RE = re.compile(r"^<!--\s*image\s*-->$", re.IGNORECASE)
 PAGE_MARKER_RE = re.compile(r"^<!--\s*page\s*:\s*(?P<page>\d+)\s*-->$", re.IGNORECASE)
 OCR_CONFIDENCE_RE = re.compile(
     r"^<!--\s*ocr_confidence\s*:\s*(?P<confidence>\d+(?:\.\d+)?)\s*-->$",
@@ -70,6 +71,22 @@ def detect_heading(text: str) -> tuple[bool, int]:
                 return True, 2
 
     return False, 0
+
+
+def _parse_markdown_table_rows(lines: list[str]) -> list[list[str]] | None:
+    """Parse clean pipe-table rows while preserving raw Markdown as fallback."""
+    rows: list[list[str]] = []
+    for line in lines:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not cells:
+            return None
+        # Markdown's separator row (| --- | :---: |) is not data.
+        if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            continue
+        rows.append(cells)
+    if len(rows) < 2 or len({len(row) for row in rows}) != 1:
+        return None
+    return rows
 
 
 def parse_markdown_to_education(
@@ -167,6 +184,20 @@ def parse_markdown_to_education(
             i += 1
             continue
 
+        if IMAGE_PLACEHOLDER_RE.match(line):
+            ensure_default_lesson()
+            current_lesson.elements.append(
+                Element(
+                    type=ElementType.IMAGE,
+                    text="[Image: Docling placeholder]",
+                    metadata=make_meta(current_chapter.title, current_lesson.title).model_copy(
+                        update={"extra": {"association": "docling_placeholder"}}
+                    ),
+                )
+            )
+            i += 1
+            continue
+
         # --- Markdown Heading (# ## ###) ---
         heading_match = HEADING_RE.match(line)
         if heading_match:
@@ -230,6 +261,8 @@ def parse_markdown_to_education(
                 Element(
                     type=ElementType.TABLE,
                     text="\n".join(table_lines),
+                    format="rows" if _parse_markdown_table_rows(table_lines) else "markdown",
+                    rows=_parse_markdown_table_rows(table_lines),
                     metadata=make_meta(current_chapter.title, current_lesson.title),
                 )
             )

@@ -9,6 +9,7 @@ Requires Tesseract binary installed on the OS:
 from __future__ import annotations
 
 import io
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,8 @@ import pytesseract
 from pytesseract import Output
 
 from parsers.base import BaseParser
+
+logger = logging.getLogger(__name__)
 
 _COMMON_WINDOWS_PATHS = [
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
@@ -79,6 +82,16 @@ class TesseractParser(BaseParser):
                 "or install tesseract-ocr via apt/brew."
             ) from exc
 
+        requested_languages = set(self.lang.split("+"))
+        installed_languages = set(pytesseract.get_languages(config=""))
+        missing_languages = sorted(requested_languages - installed_languages)
+        if missing_languages:
+            raise RuntimeError(
+                "Required Tesseract language data is missing: "
+                f"{', '.join(missing_languages)}. Install the matching traineddata "
+                "files (for example: apt install tesseract-ocr-ara) and rerun."
+            )
+
         doc = fitz.open(file_path)
         full_text = []
         try:
@@ -117,9 +130,13 @@ class TesseractParser(BaseParser):
                         f"<!-- ocr_confidence: {mean_confidence:.2f} -->\n"
                         f"{page_text}"
                     )
-                except Exception:
+                except Exception as exc:
                     # Preserve page provenance even when a language pack is missing.
-                    full_text.append(f"<!-- page: {page_num} -->\n{page.get_text().strip()}")
+                    logger.warning("Tesseract OCR failed on page %s: %s", page_num, exc)
+                    full_text.append(
+                        f"<!-- page: {page_num} -->\n"
+                        f"<!-- ocr_confidence: 0.00 -->\n{page.get_text().strip()}"
+                    )
         finally:
             doc.close()
         return "\n\n".join(full_text)

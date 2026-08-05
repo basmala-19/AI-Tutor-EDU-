@@ -7,17 +7,27 @@ Subsequent runs use the cached model.
 Install: pip install docling
 """
 import os
+import logging
 
 import fitz
 
 from .base import BaseParser
+
+logger = logging.getLogger(__name__)
 
 
 class DoclingParser(BaseParser):
     """Parse born-digital PDFs using IBM Docling (Granite model)."""
 
     name = "docling"
-    _MAX_PAGES_PER_CONVERSION = 10
+    # A one-page conversion preserves an unambiguous source-page marker in
+    # exported Markdown.  Larger ranges lose page-level provenance in
+    # Docling's current Markdown exporter and made zero-page detection
+    # impossible.  This can be increased only after provenance is retained.
+    _MAX_PAGES_PER_CONVERSION = 1
+
+    def __init__(self) -> None:
+        self.last_page_markers: list[int] = []
 
     @staticmethod
     def _has_usable_text_layer(file_path: str, sample_pages: int = 3) -> bool:
@@ -49,6 +59,15 @@ class DoclingParser(BaseParser):
         # Do not invoke RapidOCR on a born-digital textbook: its own PDF text
         # is more accurate and the OCR stage wastes significant memory.
         options.do_ocr = False
+        # Verified against installed Docling 2.118.0.  It already defaults to
+        # ACCURATE, but setting it explicitly prevents version drift.
+        from docling.datamodel.pipeline_options import TableFormerMode
+        options.do_table_structure = True
+        options.table_structure_options.mode = TableFormerMode.ACCURATE
+        # Exporting picture assets is enabled only for born-digital documents;
+        # image_extractor.py remains the portable fallback for PDFs whose
+        # Markdown exporter still emits a bare <!-- image --> placeholder.
+        options.generate_picture_images = True
         # Process large books conservatively; default batches of four pages can
         # exhaust Windows/ONNXRuntime memory on illustrated textbooks.
         options.ocr_batch_size = 1
@@ -73,6 +92,7 @@ class DoclingParser(BaseParser):
         # backend releases page memory between ranges while preserving Docling
         # as the primary parser for born-digital books.
         markdown_parts: list[str] = []
+        self.last_page_markers = []
         for first_page in range(1, page_count + 1, self._MAX_PAGES_PER_CONVERSION):
             last_page = min(first_page + self._MAX_PAGES_PER_CONVERSION - 1, page_count)
             result = converter.convert(file_path, page_range=(first_page, last_page))
@@ -83,6 +103,13 @@ class DoclingParser(BaseParser):
             markdown_parts.append(
                 f"<!-- page: {first_page} -->\n{result.document.export_to_markdown()}"
             )
+            self.last_page_markers.append(first_page)
+
+        logger.info(
+            "Docling page markers for %s: %s",
+            file_path,
+            self.last_page_markers,
+        )
 
         markdown = "\n\n".join(markdown_parts)
         # A non-empty partial conversion is still a failure for RAG.  This

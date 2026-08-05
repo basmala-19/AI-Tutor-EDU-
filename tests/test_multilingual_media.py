@@ -35,3 +35,24 @@ def test_markdown_image_keeps_page_and_retrieval_context():
     assert image_chunk["chapter"] == "Biology"
     assert image_chunk["lesson"] == "Cell"
     assert image_chunk["image_path"] == "assets/cell.png"
+
+
+def test_docling_image_placeholder_is_an_image_not_a_paragraph():
+    document = parse_markdown_to_education(
+        "# Biology\n\n## Cell\n\n<!-- image -->", "biology.pdf", "docling", "en"
+    )
+    element = document.all_elements()[-1][0]
+    assert element.type == ElementType.IMAGE
+    assert element.metadata.extra["association"] == "docling_placeholder"
+
+
+def test_clean_pipe_table_has_structured_rows():
+    document = parse_markdown_to_education(
+        "# Math\n\n## Data\n\n| A | B |\n| --- | --- |\n| 1 | 2 |",
+        "math.pdf",
+        "docling",
+        "en",
+    )
+    table = next(el for el, _, _ in document.all_elements() if el.type == ElementType.TABLE)
+    assert table.format == "rows"
+    assert table.rows == [["A", "B"], ["1", "2"]]

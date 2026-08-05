@@ -187,3 +187,31 @@ def ocr_confidence_check(edoc: EducationalDocument, threshold: float = 0.60) -> 
         else f"{len(low)}/{len(ocr_elements)} OCR elements below {threshold:.0%} (mean {mean:.0%})"
     )
     return {"status": status, "detail": detail}
+
+
+def page_coverage(edoc: EducationalDocument, expected_page_count: int | None) -> dict:
+    """Detect pages silently lost between extraction and structured output."""
+    if not expected_page_count:
+        return {"status": "PASS", "detail": "source page count unavailable"}
+    present = {el.metadata.page for el in _all_elements(edoc) if el.metadata.page > 0}
+    missing = [page for page in range(1, expected_page_count + 1) if page not in present]
+    status = "PASS" if not missing else "FAIL"
+    detail = (
+        f"all {expected_page_count} source pages have at least one element"
+        if not missing
+        else f"{len(missing)}/{expected_page_count} source pages have zero elements (e.g. {missing[:5]})"
+    )
+    return {"status": status, "detail": detail}
+
+
+def structured_table_rows(edoc: EducationalDocument) -> dict:
+    """Ensure clean Markdown tables retain a row-level representation."""
+    tables = [el for el in _all_elements(edoc) if el.type == ElementType.TABLE]
+    if not tables:
+        return {"status": "PASS", "detail": "no tables to validate"}
+    structured = [el for el in tables if el.format == "rows" and el.rows]
+    status = "PASS" if len(structured) == len(tables) else "FAIL"
+    return {
+        "status": status,
+        "detail": f"{len(structured)}/{len(tables)} tables contain structured rows",
+    }

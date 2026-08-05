@@ -58,6 +58,14 @@ class Element(BaseModel):
         default=None,
         description="Heading depth when type=heading (1=chapter, 2=lesson, 3=sub-lesson …)",
     )
+    format: Optional[str] = Field(
+        default=None,
+        description="Structured representation format, e.g. markdown, html, or rows for tables.",
+    )
+    rows: Optional[list[list[str]]] = Field(
+        default=None,
+        description="Parsed table cells when the source table can be read without loss.",
+    )
     metadata: ElementMetadata
 
 

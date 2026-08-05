@@ -12,8 +12,10 @@ from evaluation.metrics import (
     content_faithfulness,
     metadata_completeness,
     ocr_confidence_check,
+    page_coverage,
     reading_order,
     semantic_formatting,
+    structured_table_rows,
     table_preservation,
 )
 
@@ -21,6 +23,7 @@ from evaluation.metrics import (
 def build_quality_report(
     source_markdown: str,
     edoc: EducationalDocument,
+    expected_page_count: int | None = None,
 ) -> dict[str, dict]:
     """Run all quality metrics and return a combined report.
 
@@ -38,6 +41,8 @@ def build_quality_report(
         "metadata_completeness": metadata_completeness(edoc),
         "reading_order": reading_order(edoc),
         "ocr_confidence": ocr_confidence_check(edoc),
+        "page_coverage": page_coverage(edoc, expected_page_count),
+        "structured_table_rows": structured_table_rows(edoc),
     }
 
 
