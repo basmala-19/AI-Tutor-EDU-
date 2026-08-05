@@ -11,6 +11,7 @@ from schema.models import EducationalDocument
 from evaluation.metrics import (
     content_faithfulness,
     metadata_completeness,
+    ocr_confidence_check,
     reading_order,
     semantic_formatting,
     table_preservation,
@@ -36,6 +37,7 @@ def build_quality_report(
         "semantic_formatting": semantic_formatting(edoc),
         "metadata_completeness": metadata_completeness(edoc),
         "reading_order": reading_order(edoc),
+        "ocr_confidence": ocr_confidence_check(edoc),
     }
 
 

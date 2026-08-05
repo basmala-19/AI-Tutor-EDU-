@@ -16,6 +16,7 @@ from typing import Optional
 import fitz
 from PIL import Image
 import pytesseract
+from pytesseract import Output
 
 from parsers.base import BaseParser
 
@@ -65,10 +66,10 @@ class TesseractParser(BaseParser):
             # Fallback to PyMuPDF text layer extraction if Tesseract binary is not installed
             doc = fitz.open(file_path)
             extracted = []
-            for page in doc:
+            for page_num, page in enumerate(doc, 1):
                 text = page.get_text().strip()
                 if text:
-                    extracted.append(text)
+                    extracted.append(f"<!-- page: {page_num} -->\n{text}")
             doc.close()
             if extracted:
                 return "\n\n".join(extracted)
@@ -80,23 +81,45 @@ class TesseractParser(BaseParser):
 
         doc = fitz.open(file_path)
         full_text = []
+        try:
+            for page_num, page in enumerate(doc, 1):
+                pix = page.get_pixmap(dpi=self.dpi)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                if img.mode != "L":
+                    img = img.convert("L")
 
-        for page_num, page in enumerate(doc, 1):
-            pix = page.get_pixmap(dpi=self.dpi)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            if img.mode != "L":
-                img = img.convert("L")
+                try:
+                    data = pytesseract.image_to_data(
+                        img,
+                        lang=self.lang,
+                        config=f"--psm {self.psm}",
+                        output_type=Output.DICT,
+                    )
+                    words = []
+                    confidences = []
+                    for text, confidence in zip(data["text"], data["conf"]):
+                        clean = text.strip()
+                        try:
+                            score = float(confidence)
+                        except (TypeError, ValueError):
+                            score = -1.0
+                        if clean:
+                            words.append(clean)
+                            if score >= 0:
+                                confidences.append(score)
 
-            try:
-                text = pytesseract.image_to_string(
-                    img,
-                    lang=self.lang,
-                    config=f"--psm {self.psm}",
-                )
-                full_text.append(text.strip())
-            except Exception:
-                # Fallback to page text if language pack is missing
-                full_text.append(page.get_text().strip())
-
-        doc.close()
+                    page_text = " ".join(words)
+                    mean_confidence = (
+                        sum(confidences) / len(confidences) if confidences else 0.0
+                    )
+                    full_text.append(
+                        f"<!-- page: {page_num} -->\n"
+                        f"<!-- ocr_confidence: {mean_confidence:.2f} -->\n"
+                        f"{page_text}"
+                    )
+                except Exception:
+                    # Preserve page provenance even when a language pack is missing.
+                    full_text.append(f"<!-- page: {page_num} -->\n{page.get_text().strip()}")
+        finally:
+            doc.close()
         return "\n\n".join(full_text)

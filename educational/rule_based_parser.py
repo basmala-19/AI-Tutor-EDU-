@@ -30,6 +30,10 @@ from schema.models import (
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 IMAGE_RE = re.compile(r"^!\[(?P<alt>.*?)\]\((?P<path>[^)]+)\)\s*$")
 PAGE_MARKER_RE = re.compile(r"^<!--\s*page\s*:\s*(?P<page>\d+)\s*-->$", re.IGNORECASE)
+OCR_CONFIDENCE_RE = re.compile(
+    r"^<!--\s*ocr_confidence\s*:\s*(?P<confidence>\d+(?:\.\d+)?)\s*-->$",
+    re.IGNORECASE,
+)
 ARABIC_CHAPTER_RE = re.compile(r"^(?:الفصل|الوحدة)\s+[\d\u0660-\u0669\u0600-\u06FF]+")
 ARABIC_LESSON_RE = re.compile(r"^(?:الدرس|درس)\s+[\d\u0660-\u0669\u0600-\u06FF]+")
 
@@ -91,6 +95,7 @@ def parse_markdown_to_education(
     current_chapter: Chapter | None = None
     current_lesson: Lesson | None = None
     page = 1
+    current_confidence: float | None = None
 
     def ensure_default_chapter() -> None:
         nonlocal current_chapter
@@ -106,11 +111,16 @@ def parse_markdown_to_education(
             current_chapter.lessons.append(current_lesson)
 
     def make_meta(chapter_title: str, lesson_title: str) -> ElementMetadata:
+        extra = {}
+        if current_confidence is not None:
+            extra["needs_review"] = current_confidence < 0.60
         return ElementMetadata(
             page=page,
             chapter=chapter_title,
             lesson=lesson_title,
             parser=parser,
+            confidence=current_confidence,
+            extra=extra,
         )
 
     lines = markdown_text.split("\n")
@@ -124,6 +134,14 @@ def parse_markdown_to_education(
         page_match = PAGE_MARKER_RE.match(line)
         if page_match:
             page = int(page_match.group("page"))
+            current_confidence = None
+            i += 1
+            continue
+
+        confidence_match = OCR_CONFIDENCE_RE.match(line)
+        if confidence_match:
+            raw = float(confidence_match.group("confidence"))
+            current_confidence = max(0.0, min(raw / 100.0, 1.0))
             i += 1
             continue
 
@@ -135,12 +153,14 @@ def parse_markdown_to_education(
                 Element(
                     type=ElementType.IMAGE,
                     text=f"[Image: {alt_text}]",
-                    metadata=ElementMetadata(
-                        page=page,
-                        chapter=current_chapter.title,
-                        lesson=current_lesson.title,
-                        parser=parser,
-                        extra={"image_path": image_match.group("path"), "alt_text": alt_text},
+                    metadata=make_meta(current_chapter.title, current_lesson.title).model_copy(
+                        update={
+                            "extra": {
+                                **make_meta(current_chapter.title, current_lesson.title).extra,
+                                "image_path": image_match.group("path"),
+                                "alt_text": alt_text,
+                            }
+                        }
                     ),
                 )
             )

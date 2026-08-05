@@ -102,6 +102,27 @@ class ParserRouter:
 
         return self._registry["docling"]
 
+    def build_chain(self, probe: ProbeResult, language: str) -> list[BaseParser]:
+        """Build an ordered, content-driven parser fallback chain.
+
+        Born-digital PDFs retain their text layer, so Docling is the preferred
+        layout-aware parser.  Scanned PDFs have no usable text layer; running
+        Docling first only consumes RAM, therefore local Tesseract starts the
+        scan path and LlamaParse remains the cloud recovery option.
+        """
+        ocr_language = {"ar": "ara", "en": "eng"}.get(language, "ara+eng")
+        llama_language = language if language in {"ar", "en"} else "auto"
+        if probe.is_born_digital:
+            return [
+                self._registry["docling"],
+                self.get_llama_parser(llama_language),
+                TesseractParser(lang=ocr_language),
+            ]
+        return [
+            TesseractParser(lang=ocr_language),
+            self.get_llama_parser(llama_language),
+        ]
+
     def route(self, file_path: str) -> tuple[BaseParser, ProbeResult, str]:
         """Probe document, detect content language, and return (selected_parser, probe, detected_language)."""
         probe = probe_document(file_path)

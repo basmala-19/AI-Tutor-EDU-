@@ -35,7 +35,6 @@ from routing.router import ParserRouter, detect_language_from_content
 from educational.rule_based_parser import parse_markdown_to_education
 from evaluation.reports import build_quality_report
 from parsers.image_extractor import attach_extracted_images, extract_images_from_pdf
-from parsers.ocr_parser import TesseractParser
 
 
 def run_pipeline(
@@ -64,13 +63,10 @@ def run_pipeline(
     _, probe, detected_language = router.route(file_path)
     language = language or detected_language
 
-    # A deterministic parser chain: Docling first, LlamaParse for layout/VLM
-    # recovery, then local Tesseract as the last-resort OCR path.
-    candidates = [
-        router._registry["docling"],
-        router.get_llama_parser(language if language in {"ar", "en"} else "auto"),
-        TesseractParser(lang={"ar": "ara", "en": "eng"}.get(language, "ara+eng")),
-    ]
+    # The order depends on the actual PDF probe, not its file name. Digital
+    # documents use Docling first; scans use local OCR first to avoid loading
+    # Docling's layout models where there is no text layer to preserve.
+    candidates = router.build_chain(probe, language)
     failures: list[str] = []
     parser_attempts: list[dict[str, str]] = []
     for selected_parser in candidates:

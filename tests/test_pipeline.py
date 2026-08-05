@@ -203,6 +203,7 @@ class TestQualityReportInPipeline:
             "semantic_formatting",
             "metadata_completeness",
             "reading_order",
+            "ocr_confidence",
         }
         assert expected.issubset(quality.keys()), (
             f"Missing metrics: {expected - set(quality.keys())}"
@@ -300,7 +301,7 @@ class TestEndToEnd:
         quality = build_quality_report(markdown, edoc)
 
         assert len(edoc.chapters) > 0
-        assert len(quality) == 5
+        assert len(quality) == 6
         for v in quality.values():
             assert v["status"] in ("PASS", "FAIL")
 

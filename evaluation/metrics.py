@@ -163,3 +163,27 @@ def reading_order(edoc: EducationalDocument) -> dict:
         else f"{len(violations)} order violation(s) detected (e.g. page {violations[0][0]} → {violations[0][1]})"
     )
     return {"status": status, "detail": detail}
+
+
+def ocr_confidence_check(edoc: EducationalDocument, threshold: float = 0.60) -> dict:
+    """Flag low-confidence OCR elements without penalising non-OCR parsers.
+
+    OCR confidence is emitted by :class:`TesseractParser` per page and stored
+    on every derived element as a normalized value in the 0-1 range.
+    """
+    ocr_elements = [
+        el for el in _all_elements(edoc)
+        if el.metadata.parser == "tesseract" and el.metadata.confidence is not None
+    ]
+    if not ocr_elements:
+        return {"status": "PASS", "detail": "no OCR confidence data to validate"}
+
+    low = [el for el in ocr_elements if el.metadata.confidence < threshold]
+    mean = sum(el.metadata.confidence for el in ocr_elements) / len(ocr_elements)
+    status = "PASS" if not low else "FAIL"
+    detail = (
+        f"{len(ocr_elements)} OCR elements, mean confidence {mean:.0%}"
+        if not low
+        else f"{len(low)}/{len(ocr_elements)} OCR elements below {threshold:.0%} (mean {mean:.0%})"
+    )
+    return {"status": status, "detail": detail}

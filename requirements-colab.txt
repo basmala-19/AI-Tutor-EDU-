@@ -1,0 +1,3 @@
+# Runtime dependencies for Google Colab.  Install Tesseract language packs
+# separately with apt (see README.md).
+-r requirements.txt
