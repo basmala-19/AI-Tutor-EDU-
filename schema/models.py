@@ -26,6 +26,7 @@ class ElementType(str, Enum):
     EXERCISE = "exercise"
     DEFINITION = "definition"
     LIST = "list"
+    EQUATION = "equation"
 
 
 class ElementMetadata(BaseModel):

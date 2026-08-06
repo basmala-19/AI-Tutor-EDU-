@@ -10,7 +10,19 @@ This is a typed placeholder. The Router and pipeline are already ready to accept
 it without changes to any other module — just pass an instance to the pipeline
 instead of using parse_markdown_to_education().
 """
-from schema.models import EducationalDocument
+from __future__ import annotations
+
+import json
+import re
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Callable
+
+import fitz
+from PIL import Image
+
+from schema.models import EducationalDocument, Element, ElementType
 
 EDUCATIONAL_EXTRACTION_PROMPT = """\
 Convert this lesson text into a structured educational JSON.
@@ -49,3 +61,138 @@ class LLMEducationalParser:
             "this method. Return type must match rule_based_parser so the "
             "chunker and evaluation layer require no changes."
         )
+
+
+QWEN_REFINEMENT_PROMPT = """You are refining one already-parsed textbook element.
+Use only visible evidence. Return one JSON object and no markdown:
+{"type":"image|table|equation|heading|paragraph", "caption":"", "description":"",
+ "educational_role":"", "headers":[], "rows":[], "latex":"", "text":""}
+Do not invent facts. Keep text empty unless the supplied original text is empty or a placeholder.
+"""
+
+
+@dataclass
+class RefinementReport:
+    candidates: int = 0
+    calls: int = 0
+    applied: int = 0
+    rejected: int = 0
+    latency_seconds: float = 0.0
+
+
+class QwenVLRefiner:
+    """Opt-in, local Qwen2.5-VL refinement for uncertain elements only.
+
+    The model is deliberately loaded lazily.  It never edits useful parser
+    text: descriptions, structured rows, LaTeX, and type are additive fields.
+    """
+
+    PLACEHOLDERS = {"", "[image: docling placeholder]", "[image: image]"}
+
+    def __init__(
+        self,
+        model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct",
+        model_client: Callable[[Image.Image, str], str] | None = None,
+    ) -> None:
+        self.model_id = model_id
+        self.model_client = model_client
+        self._model = None
+        self._processor = None
+
+    @classmethod
+    def needs_refinement(cls, element: Element) -> bool:
+        text = (element.text or "").strip().lower()
+        return (
+            element.metadata.extra.get("needs_review") is True
+            or (element.type == ElementType.IMAGE and text in cls.PLACEHOLDERS)
+            or (element.type == ElementType.TABLE and not element.rows)
+            or (element.type == ElementType.HEADING and (not element.text or not element.level))
+        )
+
+    def _load(self) -> None:
+        if self._model is not None:
+            return
+        try:
+            import torch
+            from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        except ImportError as exc:
+            raise RuntimeError(
+                "Qwen refinement needs the optional local dependencies. "
+                "Install requirements-qwen.txt and use a GPU runtime."
+            ) from exc
+        self._processor = AutoProcessor.from_pretrained(self.model_id)
+        self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            self.model_id, torch_dtype="auto", device_map="auto"
+        )
+
+    def _generate(self, image: Image.Image, prompt: str) -> str:
+        if self.model_client:
+            return self.model_client(image, prompt)
+        self._load()
+        messages = [{"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": prompt}]}]
+        text = self._processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = self._processor(text=[text], images=[image], return_tensors="pt", padding=True).to(self._model.device)
+        output_ids = self._model.generate(**inputs, max_new_tokens=512)
+        generated = output_ids[:, inputs.input_ids.shape[1]:]
+        return self._processor.batch_decode(generated, skip_special_tokens=True)[0]
+
+    @staticmethod
+    def _page_image(pdf_path: str, page: int, bbox: list[float] | None) -> Image.Image:
+        document = fitz.open(pdf_path)
+        try:
+            source_page = document[page - 1]
+            clip = fitz.Rect(bbox) if bbox and len(bbox) == 4 else None
+            pix = source_page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
+            return Image.open(__import__("io").BytesIO(pix.tobytes("png"))).convert("RGB")
+        finally:
+            document.close()
+
+    @staticmethod
+    def _json_response(response: str) -> dict:
+        cleaned = re.sub(r"^```(?:json)?|```$", "", response.strip(), flags=re.IGNORECASE).strip()
+        return json.loads(cleaned)
+
+    @staticmethod
+    def _apply(element: Element, result: dict) -> bool:
+        original = (element.text or "").strip()
+        candidate_text = (result.get("text") or "").strip()
+        placeholder = original.lower() in QwenVLRefiner.PLACEHOLDERS
+        # Existing text is immutable.  A response trying to alter it is
+        # rejected instead of silently hallucinating a replacement.
+        if original and not placeholder and candidate_text and candidate_text != original:
+            return False
+        proposed_type = result.get("type")
+        if proposed_type in {member.value for member in ElementType}:
+            element.type = ElementType(proposed_type)
+        if placeholder and candidate_text:
+            element.text = candidate_text
+        extra = element.metadata.extra
+        for key in ("caption", "description", "educational_role", "headers", "latex"):
+            if result.get(key):
+                extra[key] = result[key]
+        if result.get("rows") and isinstance(result["rows"], list):
+            element.rows = result["rows"]
+            element.format = "rows"
+        extra["refined_by"] = "qwen"
+        extra["refinement_applied"] = "selective local VLM refinement"
+        return True
+
+    def refine(self, document: EducationalDocument, pdf_path: str, max_elements: int = 20) -> dict:
+        report = RefinementReport()
+        started = time.perf_counter()
+        elements = [element for element, _, _ in document.all_elements() if self.needs_refinement(element)]
+        report.candidates = len(elements)
+        for element in elements[:max_elements]:
+            image = self._page_image(pdf_path, element.metadata.page, element.metadata.bbox)
+            prompt = QWEN_REFINEMENT_PROMPT + f"\nOriginal type: {element.type.value}\nOriginal text: {element.text or ''}"
+            report.calls += 1
+            try:
+                response = self._json_response(self._generate(image, prompt))
+                if self._apply(element, response):
+                    report.applied += 1
+                else:
+                    report.rejected += 1
+            except Exception:
+                report.rejected += 1
+        report.latency_seconds = round(time.perf_counter() - started, 3)
+        return asdict(report)

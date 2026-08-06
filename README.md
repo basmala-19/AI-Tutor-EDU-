@@ -83,6 +83,23 @@ streamlit run app.py
 The JSON download is the structured `EducationalDocument` to use in the next
 Chunking stage; Markdown is retained for parser review and debugging.
 
+### Optional local Qwen-VL refinement
+
+Qwen is an opt-in post-processing layer, not a replacement parser. It only
+reviews images without useful captions, tables without rows, invalid headings,
+and low-confidence OCR. It preserves existing text and records every accepted
+change in `metadata.extra.refined_by = "qwen"`.
+
+```powershell
+python -m pip install -r requirements-qwen.txt
+streamlit run app.py
+```
+
+Use a GPU runtime (for example, Colab GPU) and enable **Refine flagged elements
+with local Qwen-VL** in the sidebar. The default model, Qwen2.5-VL-3B, downloads
+on first use. It can improve visual descriptions but is not guaranteed to match
+LlamaParse; validate its `refinement_report` and the quality metrics per book.
+
 Tests use tiny generated PDF fixtures; no academic or benchmark PDFs are
 committed. Ground truth must be human-reviewed before it is promoted and used
 by the benchmark evaluator.

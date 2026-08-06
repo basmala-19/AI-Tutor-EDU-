@@ -69,6 +69,8 @@ with st.sidebar:
     st.header("Document")
     uploaded = st.file_uploader("Upload a PDF textbook", type=["pdf"])
     include_chunks = st.toggle("Generate chunks", value=False)
+    refine_with_qwen = st.toggle("Refine flagged elements with local Qwen-VL", value=False)
+    qwen_max_elements = st.slider("Maximum Qwen refinements", 1, 50, 10, disabled=not refine_with_qwen)
     run = st.button("Parse document", type="primary", use_container_width=True)
     st.divider()
     st.caption("JSON is the source of truth for Chunking. Markdown is a debug/review view.")
@@ -84,6 +86,8 @@ if run:
                     str(file_path),
                     include_chunks=include_chunks,
                     include_markdown=True,
+                    refine_with_qwen=refine_with_qwen,
+                    qwen_max_elements=qwen_max_elements,
                 )
                 st.session_state["pdf_path"] = str(file_path)
                 st.session_state["pdf_name"] = uploaded.name
@@ -152,6 +156,7 @@ if result and pdf_path:
                 "parser_attempts": result["parser_attempts"],
                 "probe": probe,
                 "chunk_count": result.get("chunk_count"),
+                "refinement_report": result.get("refinement_report"),
             },
             expanded=False,
         )

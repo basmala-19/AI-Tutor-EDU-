@@ -1,0 +1,5 @@
+# Optional local Qwen2.5-VL refinement. Use a GPU runtime; the model itself is
+# downloaded on first use and is intentionally not part of the default stack.
+transformers>=4.49.0
+accelerate
+qwen-vl-utils

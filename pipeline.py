@@ -42,6 +42,8 @@ def run_pipeline(
     language: str | None = None,
     include_chunks: bool = False,
     include_markdown: bool = False,
+    refine_with_qwen: bool = False,
+    qwen_max_elements: int = 20,
 ) -> dict:
     """Run the full document pipeline.
 
@@ -55,7 +57,7 @@ def run_pipeline(
 
     Returns:
         Dict with keys: probe, parser, language, educational_document, quality_report,
-        and optionally chunks / chunk_count and parser_markdown.
+        and optionally chunks / chunk_count, parser_markdown, and refinement_report.
     """
     if language is None:
         language = detect_language_from_content(file_path)
@@ -96,6 +98,11 @@ def run_pipeline(
     images_by_page = extract_images_from_pdf(file_path)
     attach_extracted_images(edoc, images_by_page, parser=selected_parser.name)
 
+    refinement_report = None
+    if refine_with_qwen:
+        from educational.llm_parser import QwenVLRefiner
+        refinement_report = QwenVLRefiner().refine(edoc, file_path, qwen_max_elements)
+
     quality_report = build_quality_report(markdown, edoc, expected_page_count=probe.num_pages)
 
     result: dict = {
@@ -108,6 +115,8 @@ def run_pipeline(
     }
     if hasattr(selected_parser, "last_page_markers"):
         result["page_markers"] = selected_parser.last_page_markers
+    if refinement_report is not None:
+        result["refinement_report"] = refinement_report
 
     if include_chunks:
         from chunking.chunker import chunk_educational_document
