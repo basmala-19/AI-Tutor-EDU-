@@ -63,3 +63,16 @@ def test_noisy_tesseract_pipe_text_is_not_promoted_to_a_table():
         "| OCR noise |\n| broken", "scan.pdf", "tesseract", "en"
     )
     assert all(element.type != ElementType.TABLE for element, _, _ in document.all_elements())
+
+
+def test_html_table_is_preserved_with_rows_and_headers():
+    document = parse_markdown_to_education(
+        "# Data\n\n<table><tr><th>Name</th><th>Score</th></tr><tr><td>Ada</td><td>10</td></tr></table>",
+        "table.pdf",
+        "docling",
+        "en",
+    )
+    table = next(element for element, _, _ in document.all_elements() if element.type == ElementType.TABLE)
+    assert table.format == "html"
+    assert table.rows == [["Name", "Score"], ["Ada", "10"]]
+    assert table.metadata.extra["headers"] == ["Name", "Score"]

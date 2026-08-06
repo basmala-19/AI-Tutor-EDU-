@@ -17,6 +17,7 @@ The same code path handles Arabic, English, and any other language.
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 
 from schema.models import (
     Chapter,
@@ -30,6 +31,7 @@ from schema.models import (
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 IMAGE_RE = re.compile(r"^!\[(?P<alt>.*?)\]\((?P<path>[^)]+)\)\s*$")
 IMAGE_PLACEHOLDER_RE = re.compile(r"^<!--\s*image\s*-->$", re.IGNORECASE)
+HTML_TABLE_START_RE = re.compile(r"^<table(?:\s|>)", re.IGNORECASE)
 PAGE_MARKER_RE = re.compile(r"^<!--\s*page\s*:\s*(?P<page>\d+)\s*-->$", re.IGNORECASE)
 OCR_CONFIDENCE_RE = re.compile(
     r"^<!--\s*ocr_confidence\s*:\s*(?P<confidence>\d+(?:\.\d+)?)\s*-->$",
@@ -96,6 +98,46 @@ def _has_markdown_table_separator(lines: list[str]) -> bool:
         if cells and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
             return True
     return False
+
+
+class _HTMLTableReader(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self.headers: list[str] = []
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+        self._header_cell = False
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell = []
+            self._header_cell = tag == "th"
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"td", "th"} and self._cell is not None and self._row is not None:
+            value = " ".join("".join(self._cell).split())
+            self._row.append(value)
+            if self._header_cell:
+                self.headers.append(value)
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if self._row:
+                self.rows.append(self._row)
+            self._row = None
+
+
+def _parse_html_table(html: str) -> tuple[list[list[str]] | None, list[str]]:
+    reader = _HTMLTableReader()
+    reader.feed(html)
+    rows = reader.rows or None
+    return rows, reader.headers
 
 
 def parse_markdown_to_education(
@@ -205,6 +247,32 @@ def parse_markdown_to_education(
                 )
             )
             i += 1
+            continue
+
+        if HTML_TABLE_START_RE.match(line):
+            table_lines = [line]
+            j = i + 1
+            while j < len(lines):
+                table_lines.append(lines[j])
+                if "</table>" in lines[j].lower():
+                    j += 1
+                    break
+                j += 1
+            raw_html = "\n".join(table_lines)
+            rows, headers = _parse_html_table(raw_html)
+            ensure_default_lesson()
+            current_lesson.elements.append(
+                Element(
+                    type=ElementType.TABLE,
+                    text=raw_html,
+                    format="html",
+                    rows=rows,
+                    metadata=make_meta(current_chapter.title, current_lesson.title).model_copy(
+                        update={"extra": {"headers": headers, "rows": rows or []}}
+                    ),
+                )
+            )
+            i = j
             continue
 
         # --- Markdown Heading (# ## ###) ---

@@ -100,7 +100,7 @@ pdf_path = st.session_state.get("pdf_path")
 if result and pdf_path:
     probe = result["probe"]
     document = result["educational_document"]
-    markdown = result.get("parser_markdown", "")
+    markdown = result.get("raw_markdown", result.get("parser_markdown", ""))
     page_count = probe["num_pages"]
 
     with st.sidebar:

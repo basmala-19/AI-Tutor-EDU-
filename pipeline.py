@@ -126,6 +126,8 @@ def run_pipeline(
 
     if include_markdown:
         result["parser_markdown"] = markdown
+        # Clear public name; parser_markdown remains for compatibility.
+        result["raw_markdown"] = markdown
 
     return result
 

@@ -44,7 +44,7 @@ def detect_language_from_content(file_path: str, sample_pages: int = 5) -> str:
         doc.close()
 
         if not sampled_text:
-            return "unknown"
+            return _detect_language_with_osd(file_path)
 
         full_text = " ".join(sampled_text)
         arabic_char_count = sum(1 for c in full_text if "\u0600" <= c <= "\u06FF")
@@ -68,7 +68,37 @@ def detect_language_from_content(file_path: str, sample_pages: int = 5) -> str:
 
         return "en" if latin_char_count else "unknown"
     except (LangDetectException, Exception):
-        return "unknown"
+        return _detect_language_with_osd(file_path)
+
+
+def _detect_language_with_osd(file_path: str, sample_pages: int = 10) -> str:
+    """Use Tesseract OSD for scans only, rejecting low-confidence cover pages."""
+    try:
+        import io
+        from PIL import Image
+        import pytesseract
+
+        document = fitz.open(file_path)
+        try:
+            for page in document[:sample_pages]:
+                pixmap = page.get_pixmap(dpi=150, alpha=False)
+                image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+                osd = pytesseract.image_to_osd(image)
+                confidence_match = re.search(r"Script confidence:\s*([\d.]+)", osd, re.IGNORECASE)
+                script_match = re.search(r"Script:\s*(\w+)", osd, re.IGNORECASE)
+                confidence = float(confidence_match.group(1)) if confidence_match else 0.0
+                script = script_match.group(1).lower() if script_match else ""
+                if confidence < 10:
+                    continue
+                if script == "arabic":
+                    return "ar"
+                if script in {"latin", "cyrillic"}:
+                    return "en"
+        finally:
+            document.close()
+    except Exception:
+        pass
+    return "unknown"
 
 
 class ParserRouter:
