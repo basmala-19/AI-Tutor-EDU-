@@ -41,6 +41,7 @@ def run_pipeline(
     file_path: str,
     language: str | None = None,
     include_chunks: bool = False,
+    include_markdown: bool = False,
 ) -> dict:
     """Run the full document pipeline.
 
@@ -54,7 +55,7 @@ def run_pipeline(
 
     Returns:
         Dict with keys: probe, parser, language, educational_document, quality_report,
-        and optionally chunks / chunk_count.
+        and optionally chunks / chunk_count and parser_markdown.
     """
     if language is None:
         language = detect_language_from_content(file_path)
@@ -113,6 +114,9 @@ def run_pipeline(
         chunks = chunk_educational_document(edoc)
         result["chunks"] = chunks
         result["chunk_count"] = len(chunks)
+
+    if include_markdown:
+        result["parser_markdown"] = markdown
 
     return result
 

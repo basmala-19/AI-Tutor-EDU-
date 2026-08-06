@@ -88,13 +88,21 @@ def attach_extracted_images(
     when page markers are present and explicitly marked ``approximate`` when
     they are not, so retrieval never pretends to know more than it does.
     """
-    elements = document.all_elements()
+    # Keep object references, not only display titles. Textbooks frequently
+    # repeat titles such as "Introduction" across chapters; resolving a
+    # chapter/lesson again by title can then select a different lesson and
+    # raise StopIteration.
+    elements = [
+        (element, chapter, lesson)
+        for chapter in document.chapters
+        for lesson in chapter.lessons
+        for element in lesson.elements
+    ]
     for page, image_paths in images_by_page.items():
         earlier = [entry for entry in elements if entry[0].metadata.page <= page]
         if earlier:
-            _, chapter_title, lesson_title = earlier[-1]
-            chapter = next(ch for ch in document.chapters if ch.title == chapter_title)
-            lesson = next(lesson for lesson in chapter.lessons if lesson.title == lesson_title)
+            _, chapter, lesson = earlier[-1]
+            chapter_title, lesson_title = chapter.title, lesson.title
             association = "page_anchored" if earlier[-1][0].metadata.page == page else "nearest_preceding"
         elif document.chapters:
             chapter = document.chapters[0]

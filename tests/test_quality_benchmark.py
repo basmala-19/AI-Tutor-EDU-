@@ -8,7 +8,7 @@ from benchmark import quality_benchmark
 def test_runner_writes_error_and_traceback_for_failed_document(tmp_path, monkeypatch):
     (tmp_path / "broken.pdf").write_bytes(b"not a PDF")
 
-    def fail(_: str):
+    def fail(_: str, **_kwargs):
         raise ValueError("intentional parser failure")
 
     monkeypatch.setattr(quality_benchmark, "run_pipeline", fail)
@@ -28,7 +28,7 @@ def test_runner_records_parser_attempts(tmp_path, monkeypatch):
     monkeypatch.setattr(
         quality_benchmark,
         "run_pipeline",
-        lambda _: {
+        lambda _, **_kwargs: {
             "parser": "tesseract",
             "parser_attempts": [{"parser": "docling", "status": "failed", "detail": "bad layout"}],
             "quality_report": {"content": {"status": "PASS", "detail": "ok"}},
