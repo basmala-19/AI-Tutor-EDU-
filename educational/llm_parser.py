@@ -196,3 +196,40 @@ class QwenVLRefiner:
                 report.rejected += 1
         report.latency_seconds = round(time.perf_counter() - started, 3)
         return asdict(report)
+
+
+QWEN_PAGE_PARSE_PROMPT = """Convert this single educational textbook page to faithful Markdown.
+Preserve reading order and all visible text. Describe meaningful diagrams, charts,
+and instructional images in concise brackets such as [Image: ...]. Keep tables as
+Markdown pipe tables when their cells are visible. Do not invent missing text.
+Return Markdown only; no explanation or JSON wrapper.
+"""
+
+
+class QwenPageParser:
+    """High-fidelity local VLM parser for visual textbook pages.
+
+    This is intentionally a separate *mode*, rather than a hidden fallback:
+    it renders every page and is slower/costlier than the standard Docling path.
+    """
+
+    name = "qwen_vl"
+
+    def __init__(self, model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct") -> None:
+        self.refiner = QwenVLRefiner(model_id=model_id)
+        self.last_page_markers: list[int] = []
+
+    def parse(self, file_path: str) -> str:
+        pdf = fitz.open(file_path)
+        try:
+            page_count = len(pdf)
+        finally:
+            pdf.close()
+        self.last_page_markers = []
+        pages = []
+        for page_number in range(1, page_count + 1):
+            image = self.refiner._page_image(file_path, page_number, None)
+            markdown = self.refiner._generate(image, QWEN_PAGE_PARSE_PROMPT).strip()
+            pages.append(f"<!-- page: {page_number} -->\n{markdown}")
+            self.last_page_markers.append(page_number)
+        return "\n\n".join(pages)

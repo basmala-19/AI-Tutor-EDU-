@@ -100,6 +100,12 @@ with local Qwen-VL** in the sidebar. The default model, Qwen2.5-VL-3B, downloads
 on first use. It can improve visual descriptions but is not guaranteed to match
 LlamaParse; validate its `refinement_report` and the quality metrics per book.
 
+For heavily illustrated workbooks, choose **High fidelity — local Qwen-VL per
+page** in Parse Studio. This makes Qwen read each rendered PDF page rather than
+using Docling as the primary page parser. Use it only with a GPU and benchmark
+it separately: it is significantly slower, and fidelity must be measured against
+your LlamaParse reference rather than assumed.
+
 Tests use tiny generated PDF fixtures; no academic or benchmark PDFs are
 committed. Ground truth must be human-reviewed before it is promoted and used
 by the benchmark evaluator.
