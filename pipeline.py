@@ -44,7 +44,7 @@ def run_pipeline(
     include_markdown: bool = False,
     refine_with_qwen: bool = False,
     qwen_max_elements: int = 20,
-    parsing_mode: str = "standard",
+    parsing_mode: str = "auto",
 ) -> dict:
     """Run the full document pipeline.
 
@@ -63,8 +63,8 @@ def run_pipeline(
     if language is None:
         language = detect_language_from_content(file_path)
 
-    if parsing_mode not in {"standard", "high_fidelity"}:
-        raise ValueError("parsing_mode must be 'standard' or 'high_fidelity'")
+    if parsing_mode not in {"auto", "standard", "high_fidelity"}:
+        raise ValueError("parsing_mode must be 'auto', 'standard', or 'high_fidelity'")
 
     router = ParserRouter()
     _, probe, detected_language = router.route(file_path)
@@ -73,9 +73,13 @@ def run_pipeline(
     # The order depends on the actual PDF probe, not its file name. Digital
     # documents use Docling first; scans use local OCR first to avoid loading
     # Docling's layout models where there is no text layer to preserve.
-    if parsing_mode == "high_fidelity":
+    visually_dense = probe.is_born_digital and probe.image_count >= max(probe.num_pages, 1)
+    selected_mode = "high_fidelity" if parsing_mode == "high_fidelity" or (parsing_mode == "auto" and visually_dense) else "standard"
+    if selected_mode == "high_fidelity":
         from educational.llm_parser import QwenPageParser
-        candidates = [QwenPageParser()]
+        # Qwen is preferred for visual books, but OOM/unavailable local-model
+        # failures must degrade to the standard reliable parser chain.
+        candidates = [QwenPageParser(), *router.build_chain(probe, language)]
     else:
         candidates = router.build_chain(probe, language)
     failures: list[str] = []
@@ -118,7 +122,8 @@ def run_pipeline(
         "parser": selected_parser.name,
         "parser_attempts": parser_attempts,
         "language": language,
-        "parsing_mode": parsing_mode,
+        "parsing_mode": selected_mode,
+        "requested_mode": parsing_mode,
         "educational_document": json.loads(edoc.model_dump_json(exclude_none=True)),
         "quality_report": quality_report,
     }

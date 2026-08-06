@@ -68,11 +68,8 @@ st.caption("Local Docling / Tesseract parser viewer — no cloud API required")
 with st.sidebar:
     st.header("Document")
     uploaded = st.file_uploader("Upload a PDF textbook", type=["pdf"])
-    parsing_mode = st.selectbox(
-        "Parsing mode",
-        options=["standard", "high_fidelity"],
-        format_func=lambda value: "Standard — Docling / Tesseract" if value == "standard" else "High fidelity — local Qwen-VL per page (GPU)",
-    )
+    st.caption("Auto mode chooses local Qwen-VL for image-dense digital books; otherwise Docling/Tesseract is used.")
+    parsing_mode = "auto"
     include_chunks = st.toggle("Generate chunks", value=False)
     refine_with_qwen = st.toggle("Refine flagged elements with local Qwen-VL", value=False)
     qwen_max_elements = st.slider("Maximum Qwen refinements", 1, 50, 10, disabled=not refine_with_qwen)
@@ -111,7 +108,7 @@ if result and pdf_path:
 
     with st.sidebar:
         st.success(f"Parser: {result['parser']}")
-        st.write(f"Mode: `{result['parsing_mode']}`")
+        st.write(f"Mode selected: `{result['parsing_mode']}`")
         st.write(f"Language: `{result['language']}`")
         page = st.number_input("Page", min_value=1, max_value=page_count, value=1, step=1)
         st.caption(f"{page_count} pages · {len(document.get('chapters', []))} chapters")

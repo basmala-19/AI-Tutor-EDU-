@@ -14,7 +14,7 @@ def test_qwen_page_parser_marks_every_page(monkeypatch, tmp_path):
     document.close()
 
     parser = QwenPageParser()
-    monkeypatch.setattr(parser.refiner, "_page_image", lambda *_: object())
+    monkeypatch.setattr(parser.refiner, "_page_image", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(parser.refiner, "_generate", lambda *_: "# Parsed page")
     markdown = parser.parse(str(pdf_path))
 

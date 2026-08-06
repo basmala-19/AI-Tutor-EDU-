@@ -3,3 +3,4 @@
 transformers>=4.49.0
 accelerate
 qwen-vl-utils
+bitsandbytes

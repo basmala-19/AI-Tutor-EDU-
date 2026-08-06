@@ -13,6 +13,7 @@ instead of using parse_markdown_to_education().
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import asdict, dataclass
@@ -114,15 +115,24 @@ class QwenVLRefiner:
             return
         try:
             import torch
-            from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+            from transformers import AutoProcessor, BitsAndBytesConfig, Qwen2_5_VLForConditionalGeneration
         except ImportError as exc:
             raise RuntimeError(
                 "Qwen refinement needs the optional local dependencies. "
                 "Install requirements-qwen.txt and use a GPU runtime."
             ) from exc
+        # Colab T4 GPUs have ~15GB VRAM.  4-bit weights leave room for image
+        # tokens and generation; full precision can OOM before page one.
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         self._processor = AutoProcessor.from_pretrained(self.model_id)
+        quantization = BitsAndBytesConfig(load_in_4bit=True) if torch.cuda.is_available() else None
         self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.model_id, torch_dtype="auto", device_map="auto"
+            self.model_id,
+            torch_dtype="auto",
+            device_map="auto",
+            quantization_config=quantization,
         )
 
     def _generate(self, image: Image.Image, prompt: str) -> str:
@@ -137,13 +147,15 @@ class QwenVLRefiner:
         return self._processor.batch_decode(generated, skip_special_tokens=True)[0]
 
     @staticmethod
-    def _page_image(pdf_path: str, page: int, bbox: list[float] | None) -> Image.Image:
+    def _page_image(pdf_path: str, page: int, bbox: list[float] | None, scale: float = 1.0) -> Image.Image:
         document = fitz.open(pdf_path)
         try:
             source_page = document[page - 1]
             clip = fitz.Rect(bbox) if bbox and len(bbox) == 4 else None
-            pix = source_page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
-            return Image.open(__import__("io").BytesIO(pix.tobytes("png"))).convert("RGB")
+            pix = source_page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
+            image = Image.open(__import__("io").BytesIO(pix.tobytes("png"))).convert("RGB")
+            image.thumbnail((1280, 1280))
+            return image
         finally:
             document.close()
 
@@ -228,7 +240,7 @@ class QwenPageParser:
         self.last_page_markers = []
         pages = []
         for page_number in range(1, page_count + 1):
-            image = self.refiner._page_image(file_path, page_number, None)
+            image = self.refiner._page_image(file_path, page_number, None, scale=1.0)
             markdown = self.refiner._generate(image, QWEN_PAGE_PARSE_PROMPT).strip()
             pages.append(f"<!-- page: {page_number} -->\n{markdown}")
             self.last_page_markers.append(page_number)
