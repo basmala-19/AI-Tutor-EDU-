@@ -21,6 +21,9 @@ huggingface_hub
 # Testing
 pytest
 
+# Local interactive parsing viewer
+streamlit
+
 # Optional: local embedding (no OpenAI / Cohere API required)
 sentence-transformers
 

@@ -70,6 +70,19 @@ $env:PYTHONPATH = "."
 python -m pytest -q
 ```
 
+## Local Parse Studio
+
+Launch a LlamaParse-style local review interface (PDF page beside synchronized
+Markdown and JSON) without a cloud API:
+
+```powershell
+$env:PYTHONPATH = "."
+streamlit run app.py
+```
+
+The JSON download is the structured `EducationalDocument` to use in the next
+Chunking stage; Markdown is retained for parser review and debugging.
+
 Tests use tiny generated PDF fixtures; no academic or benchmark PDFs are
 committed. Ground truth must be human-reviewed before it is promoted and used
 by the benchmark evaluator.
