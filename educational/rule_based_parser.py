@@ -89,6 +89,15 @@ def _parse_markdown_table_rows(lines: list[str]) -> list[list[str]] | None:
     return rows
 
 
+def _has_markdown_table_separator(lines: list[str]) -> bool:
+    """A separator row distinguishes real Markdown from OCR pipe noise."""
+    for line in lines:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            return True
+    return False
+
+
 def parse_markdown_to_education(
     markdown_text: str,
     source_file: str,
@@ -257,12 +266,25 @@ def parse_markdown_to_education(
                 table_lines.append(lines[j].strip())
                 j += 1
             ensure_default_lesson()
+            parsed_rows = _parse_markdown_table_rows(table_lines)
+            # OCR noise can contain stray pipe characters.  Unlike Docling
+            # Markdown, it is not evidence of a table unless rows are valid.
+            if parser == "tesseract" and (parsed_rows is None or not _has_markdown_table_separator(table_lines)):
+                current_lesson.elements.append(
+                    Element(
+                        type=ElementType.PARAGRAPH,
+                        text="\n".join(table_lines),
+                        metadata=make_meta(current_chapter.title, current_lesson.title),
+                    )
+                )
+                i = j
+                continue
             current_lesson.elements.append(
                 Element(
                     type=ElementType.TABLE,
                     text="\n".join(table_lines),
-                    format="rows" if _parse_markdown_table_rows(table_lines) else "markdown",
-                    rows=_parse_markdown_table_rows(table_lines),
+                    format="rows" if parsed_rows else "markdown",
+                    rows=parsed_rows,
                     metadata=make_meta(current_chapter.title, current_lesson.title),
                 )
             )

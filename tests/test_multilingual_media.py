@@ -56,3 +56,10 @@ def test_clean_pipe_table_has_structured_rows():
     table = next(el for el, _, _ in document.all_elements() if el.type == ElementType.TABLE)
     assert table.format == "rows"
     assert table.rows == [["A", "B"], ["1", "2"]]
+
+
+def test_noisy_tesseract_pipe_text_is_not_promoted_to_a_table():
+    document = parse_markdown_to_education(
+        "| OCR noise |\n| broken", "scan.pdf", "tesseract", "en"
+    )
+    assert all(element.type != ElementType.TABLE for element, _, _ in document.all_elements())

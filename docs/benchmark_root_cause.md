@@ -2,17 +2,16 @@
 
 Baseline: `benchmark_results.csv`, supplied from the real 11-book run.
 
-## Reading order
+## Reading order (under investigation)
 
-The reported regressions have the shape `high page -> page 1` (for example
-`29 -> 1`, `180 -> 1`, `72 -> 4`). Docling's batch loop itself concatenates
-`markdown_parts` in increasing `first_page` order, so it cannot create a
-high-to-low transition by itself. The local code did, however, append every
-extracted image to the end of its target lesson after all text had been
-parsed. When the next lesson/chapter contained lower-page elements, the flat
-iterator observed a regression. `attach_extracted_images` now inserts visual
-elements in page order. `DoclingParser.last_page_markers` exposes the marker
-sequence, and the CLI prints it for a Docling run.
+An earlier hypothesis identified image insertion as one possible source of a
+high-to-low transition, and `attach_extracted_images` now inserts visuals in
+page order. The newer 11-file CSV still reports Docling-only regressions such
+as `48 -> 7`, `51 -> 6`, and `187 -> 4`; therefore image insertion was not a
+sufficient root cause. No further reading-order fix should be claimed until
+the page marker stream and raw Docling Markdown are captured for a failing
+file. `DoclingParser.last_page_markers` exposes the marker sequence, and the
+CLI prints it for a Docling run.
 
 Docling 2.118.0's Markdown export does not attach per-element page provenance.
 The pipeline now converts one source page at a time, emitting exact markers
