@@ -17,6 +17,7 @@ from langdetect.lang_detect_exception import LangDetectException
 from parsers.base import BaseParser
 from parsers.docling_parser import DoclingParser
 from parsers.llama_parser import LlamaParser
+from parsers.liteparse_parser import LiteParseParser
 from parsers.ocr_parser import TesseractParser
 from routing.probe import probe_document, ProbeResult
 
@@ -107,6 +108,7 @@ class ParserRouter:
     def __init__(self) -> None:
         self._registry: dict[str, BaseParser] = {
             "docling": DoclingParser(),
+            "liteparse": LiteParseParser(),
             "tesseract": TesseractParser(lang="ara+eng"),
             "ocr_parser": TesseractParser(lang="ara+eng"),
             "llamaparse": LlamaParser(language="auto"),
@@ -144,6 +146,7 @@ class ParserRouter:
         llama_language = language if language in {"ar", "en"} else "auto"
         if probe.is_born_digital:
             return [
+                self._registry["liteparse"],
                 self._registry["docling"],
                 self.get_llama_parser(llama_language),
                 TesseractParser(lang=ocr_language),

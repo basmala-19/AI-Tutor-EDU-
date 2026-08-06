@@ -68,12 +68,8 @@ st.caption("Local Docling / Tesseract parser viewer — no cloud API required")
 with st.sidebar:
     st.header("Document")
     uploaded = st.file_uploader("Upload a PDF textbook", type=["pdf"])
-    st.caption("Auto mode chooses local Qwen-VL for image-dense digital books; otherwise Docling/Tesseract is used.")
-    parsing_mode = "auto"
-    include_chunks = st.toggle("Generate chunks", value=False)
-    refine_with_qwen = st.toggle("Refine flagged elements with local Qwen-VL", value=False)
-    qwen_max_elements = st.slider("Maximum Qwen refinements", 1, 50, 10, disabled=not refine_with_qwen)
-    run = st.button("Parse document", type="primary", use_container_width=True)
+    st.caption("The pipeline automatically selects Docling, Tesseract, or local Qwen-VL from the PDF itself.")
+    run = st.button("Parse document", type="primary", use_container_width=True, disabled=uploaded is None)
     st.divider()
     st.caption("JSON is the source of truth for Chunking. Markdown is a debug/review view.")
 
@@ -86,11 +82,9 @@ if run:
             try:
                 st.session_state["parse_result"] = run_pipeline(
                     str(file_path),
-                    include_chunks=include_chunks,
+                    include_chunks=True,
                     include_markdown=True,
-                    refine_with_qwen=refine_with_qwen,
-                    qwen_max_elements=qwen_max_elements,
-                    parsing_mode=parsing_mode,
+                    parsing_mode="auto",
                 )
                 st.session_state["pdf_path"] = str(file_path)
                 st.session_state["pdf_name"] = uploaded.name

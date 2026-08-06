@@ -83,6 +83,18 @@ streamlit run app.py
 The JSON download is the structured `EducationalDocument` to use in the next
 Chunking stage; Markdown is retained for parser review and debugging.
 
+### Compare local parsers
+
+Measure LiteParse and Docling on the same PDF before promoting either parser:
+
+```powershell
+$env:PYTHONPATH = "."
+python -m benchmark.compare_parsers "C:\path\to\book.pdf"
+```
+
+The comparison writes parser time and all quality metrics to
+`benchmark/reports/parser_comparison.json`.
+
 ### Optional local Qwen-VL refinement
 
 Qwen is an opt-in post-processing layer, not a replacement parser. It only
@@ -100,12 +112,13 @@ with local Qwen-VL** in the sidebar. The default model, Qwen2.5-VL-3B, downloads
 on first use. It can improve visual descriptions but is not guaranteed to match
 LlamaParse; validate its `refinement_report` and the quality metrics per book.
 
-Parse Studio decides automatically: image-dense born-digital books use Qwen-VL
-per page, and regular text books use Docling/Tesseract. Qwen is loaded in 4-bit
-mode on CUDA and, if it cannot run (for example VRAM is unavailable), the
-pipeline records the failed Qwen attempt then falls back to Docling/Tesseract.
-It is significantly slower, and fidelity must be measured against your
-LlamaParse reference rather than assumed.
+Parse Studio requires only a PDF upload. It decides automatically: image-dense
+born-digital books use Qwen-VL per page, and regular text books use
+Docling/Tesseract. It always prepares chunks for the next RAG stage. Qwen is
+loaded in 4-bit mode on CUDA and, if it cannot run (for example VRAM is
+unavailable), the pipeline records the failed Qwen attempt then falls back to
+Docling/Tesseract. It is significantly slower, and fidelity must be measured
+against your LlamaParse reference rather than assumed.
 
 Tests use tiny generated PDF fixtures; no academic or benchmark PDFs are
 committed. Ground truth must be human-reviewed before it is promoted and used
