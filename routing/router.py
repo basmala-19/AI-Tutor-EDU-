@@ -24,6 +24,22 @@ from routing.probe import probe_document, ProbeResult
 DetectorFactory.seed = 0
 
 
+def detect_language_from_text(text: str) -> str:
+    """Infer Arabic/English from extracted text when PDF metadata is empty."""
+    arabic_char_count = sum(1 for char in text if "\u0600" <= char <= "\u06FF")
+    latin_char_count = sum(1 for char in text if char.isascii() and char.isalpha())
+    total_char_count = max(len(text.strip()), 1)
+    arabic_ratio = arabic_char_count / total_char_count
+    latin_ratio = latin_char_count / total_char_count
+    if arabic_ratio > 0.15 and latin_ratio > 0.15:
+        return "mixed"
+    if arabic_ratio > 0.15:
+        return "ar"
+    if latin_ratio > 0.15:
+        return "en"
+    return "unknown"
+
+
 def detect_language_from_content(file_path: str, sample_pages: int = 5) -> str:
     """Detect primary document language from actual text content.
 

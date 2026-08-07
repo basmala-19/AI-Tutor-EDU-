@@ -31,7 +31,7 @@ import argparse
 import json
 from dataclasses import asdict
 
-from routing.router import ParserRouter, detect_language_from_content
+from routing.router import ParserRouter, detect_language_from_content, detect_language_from_text
 from educational.rule_based_parser import parse_markdown_to_education
 from evaluation.reports import build_quality_report
 from parsers.image_extractor import attach_extracted_images, extract_images_from_pdf
@@ -100,6 +100,14 @@ def run_pipeline(
     else:
         raise RuntimeError("All parsers failed. " + " | ".join(failures))
 
+    # A scanned PDF has no text layer, so OSD can legitimately return
+    # ``unknown`` before OCR.  Infer it again from the actual OCR result so
+    # the final JSON and downstream Arabic rules receive the correct language.
+    if language == "unknown":
+        recovered_language = detect_language_from_text(markdown)
+        if recovered_language != "unknown":
+            language = recovered_language
+
     edoc = parse_markdown_to_education(
         markdown_text=markdown,
         source_file=file_path,
@@ -129,6 +137,8 @@ def run_pipeline(
     }
     if hasattr(selected_parser, "last_page_markers"):
         result["page_markers"] = selected_parser.last_page_markers
+    if hasattr(selected_parser, "last_ocr_profile"):
+        result["ocr_profile"] = selected_parser.last_ocr_profile
     if refinement_report is not None:
         result["refinement_report"] = refinement_report
 

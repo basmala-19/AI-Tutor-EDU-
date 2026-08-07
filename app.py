@@ -25,15 +25,31 @@ def _save_upload(uploaded_file) -> Path:
     return path
 
 
-def _markdown_for_page(markdown: str, page: int) -> str:
+def _markdown_for_page(markdown: str, page: int) -> str | None:
     markers = list(PAGE_MARKER_RE.finditer(markdown))
     if not markers:
-        return markdown
+        return None
     for index, match in enumerate(markers):
         if int(match.group(1)) == page:
             end = markers[index + 1].start() if index + 1 < len(markers) else len(markdown)
             return markdown[match.end():end].strip()
     return "_No Markdown segment was emitted for this page._"
+
+
+def _elements_as_markdown(document: dict, page: int) -> str:
+    """Render only page-scoped structured elements when raw Markdown has no markers."""
+    parts: list[str] = []
+    for element in _elements_for_page(document, page):
+        text = (element.get("text") or "").strip()
+        if not text:
+            continue
+        if element.get("type") == "heading":
+            parts.append(f"{'#' * min(element.get('level') or 2, 6)} {text}")
+        elif element.get("type") == "image":
+            parts.append(text)
+        else:
+            parts.append(text)
+    return "\n\n".join(parts)
 
 
 def _elements_for_page(document: dict, page: int) -> list[dict]:
@@ -139,7 +155,13 @@ if result and pdf_path:
         st.subheader("Parsed result")
         markdown_tab, json_tab, quality_tab = st.tabs(["Markdown", "JSON", "Quality"])
         with markdown_tab:
-            st.markdown(_markdown_for_page(markdown, int(page)))
+            page_markdown = _markdown_for_page(markdown, int(page))
+            if page_markdown is not None:
+                st.markdown(page_markdown)
+            else:
+                fallback = _elements_as_markdown(document, int(page))
+                st.caption("This parser did not emit raw page markers. Showing only structured elements associated with this page.")
+                st.markdown(fallback or "_No page-scoped content is available for this page._")
         with json_tab:
             page_json = {"page": int(page), "elements": _elements_for_page(document, int(page))}
             st.json(page_json, expanded=False)

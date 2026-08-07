@@ -47,6 +47,23 @@ HEADING_PATTERNS = [
     re.compile(r"^[أ-ي]\."),        # أ. ب.
 ]
 
+# Tesseract often merges a coloured textbook banner with nearby body text into
+# one long line. Recover the banner as structure, but retain the full OCR line
+# as a paragraph so this heuristic can never discard educational content.
+_ARABIC_ORDINAL = r"(?:\u0627\u0644\u0623\u0648\u0644|\u0627\u0644\u0627\u0648\u0644|\u0627\u0644\u062b\u0627\u0646\u064a|\u0627\u0644\u062b\u0627\u0646\u0649|\u0627\u0644\u062b\u0627\u0644\u062b|\u0627\u0644\u0631\u0627\u0628\u0639|\u0627\u0644\u062e\u0627\u0645\u0633|\u0627\u0644\u0633\u0627\u062f\u0633|\u0627\u0644\u0633\u0627\u0628\u0639|\u0627\u0644\u062b\u0627\u0645\u0646|\u0627\u0644\u062a\u0627\u0633\u0639|\u0627\u0644\u0639\u0627\u0634\u0631|[0-9\u0660-\u0669]+)"
+_OCR_ARABIC_CHAPTER_EMBEDDED_RE = re.compile(
+    rf"(?P<title>(?:\u0627\u0644\u0628\u0627\u0628|\u0627\u0644\u0641\u0635\u0644|\u0627\u0644\u0648\u062d\u062f\u0629)\s*{_ARABIC_ORDINAL}(?:\s*[0-9\u0660-\u0669]+)?(?:\s*[-:\u2013\u2014]?\s*[\u0621-\u064A]{2,}){{0,8}})"
+)
+_OCR_ARABIC_SECTION_EMBEDDED_RE = re.compile(
+    rf"(?P<title>(?:\u0627\u0644\u0641\u0635\u0644|\u0627\u0644\u0648\u062d\u062f\u0629)\s*{_ARABIC_ORDINAL}(?:\s*[0-9\u0660-\u0669]+)?(?:\s*[-:\u2013\u2014]?\s*[\u0621-\u064A]{2,}){{0,8}})"
+)
+_OCR_ARABIC_LESSON_EMBEDDED_RE = re.compile(
+    rf"(?P<title>(?:\u0627\u0644\u062f\u0631\u0633|\u062f\u0631\u0633)\s*{_ARABIC_ORDINAL}(?:\s*[0-9\u0660-\u0669]+)?(?:\s*[-:\u2013\u2014]?\s*[\u0621-\u064A]{2,}){{0,8}})"
+)
+_OCR_TITLE_STOP_RE = re.compile(
+    r"\s+(?:\u0641\u064a\s+\u0646\u0647\u0627\u064a\u0629|\u0623\u0647\u062f\u0627\u0641|\u064a\u062a\u0639\u0631\u0641|\u064a\u062a\u0639\u0644\u0645|\u0646\u0634\u0627\u0637|\u062a\u062f\u0631\u064a\u0628|\u0627\u062e\u062a\u0631|\u0639\u0644\u0644|\u0645\u0627\u0630\u0627|\u0623\u0633\u0626\u0644\u0629)\b"
+)
+
 
 def detect_heading(text: str) -> tuple[bool, int]:
     """Detect heading status and level from un-marked text lines.
@@ -73,6 +90,32 @@ def detect_heading(text: str) -> tuple[bool, int]:
                 return True, 2
 
     return False, 0
+
+
+def recover_ocr_arabic_heading(text: str, parser: str, language: str | None) -> tuple[str, int] | None:
+    """Recover a chapter or lesson banner embedded in Arabic OCR text."""
+    if parser != "tesseract" or language != "ar" or len(text) < 8:
+        return None
+
+    # Prefer "chapter"/"unit" over an earlier "part" (باب), because a
+    # banner commonly contains both and the chapter is the RAG hierarchy key.
+    preferred = _OCR_ARABIC_SECTION_EMBEDDED_RE.search(text)
+    if preferred and preferred.start() <= 160:
+        candidates: list[tuple[int, re.Match[str]]] = [(1, preferred)]
+    else:
+        candidates = []
+    if not candidates:
+        for level, pattern in ((1, _OCR_ARABIC_CHAPTER_EMBEDDED_RE), (2, _OCR_ARABIC_LESSON_EMBEDDED_RE)):
+            match = pattern.search(text)
+            if match and match.start() <= 160:
+                candidates.append((level, match))
+    if not candidates:
+        return None
+
+    level, match = min(candidates, key=lambda item: item[1].start())
+    title = _OCR_TITLE_STOP_RE.split(match.group("title"), maxsplit=1)[0]
+    title = re.sub(r"\s+", " ", title).strip(" -:\u2013\u2014")
+    return (title, level) if len(title) >= 7 else None
 
 
 def _parse_markdown_table_rows(lines: list[str]) -> list[list[str]] | None:
@@ -302,8 +345,38 @@ def parse_markdown_to_education(
             i += 1
             continue
 
+        # --- Arabic heading embedded in a long OCR line ---
+        recovered_heading = recover_ocr_arabic_heading(line, parser, language)
+        if recovered_heading:
+            title, level = recovered_heading
+            if level == 1:
+                current_chapter = Chapter(title=title)
+                doc.chapters.append(current_chapter)
+                current_lesson = None
+            else:
+                ensure_default_chapter()
+                current_lesson = Lesson(title=title)
+                current_chapter.lessons.append(current_lesson)
+
+            ensure_default_lesson()
+            current_lesson.elements.append(
+                Element(
+                    type=ElementType.HEADING,
+                    text=title,
+                    level=level,
+                    metadata=make_meta(current_chapter.title, current_lesson.title),
+                )
+            )
+            # Continue into paragraph handling below: objective/body text that
+            # shares the OCR line must remain retrievable.
+
         # --- Heuristic Heading (for un-marked OCR / plain text) ---
-        is_heuristic_heading, level = detect_heading(line)
+        is_heuristic_heading, level = (False, 0) if recovered_heading else detect_heading(line)
+        # OCR body text often begins with a stray page/question number.  Bare
+        # numeric-prefix headings are useful for clean digital Markdown, but
+        # create false lessons such as "2 9 ..." in scanned Arabic books.
+        if parser == "tesseract" and re.match(r"^[0-9\u0660-\u0669]", line):
+            is_heuristic_heading, level = False, 0
         if is_heuristic_heading:
             if level == 1:
                 current_chapter = Chapter(title=line)

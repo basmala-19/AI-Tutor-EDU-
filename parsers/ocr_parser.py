@@ -39,12 +39,13 @@ class TesseractParser(BaseParser):
         self,
         lang: str = "ara+eng",
         dpi: int = 300,
-        psm: int = 6,
+        psm: int | None = None,
         tesseract_cmd: Optional[str] = None,
     ) -> None:
         self.lang = lang
         self.dpi = dpi
         self.psm = psm
+        self.last_ocr_profile: dict[str, int | float | str] = {}
 
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
@@ -53,6 +54,59 @@ class TesseractParser(BaseParser):
                 if os.path.exists(candidate):
                     pytesseract.pytesseract.tesseract_cmd = candidate
                     break
+
+    def _choose_psm(self, document: fitz.Document) -> int:
+        """Choose the page segmentation mode from representative text pages.
+
+        ``PSM 6`` assumes one uniform block and is often poor for textbook
+        pages.  ``PSM 3`` lets Tesseract discover the layout.  Sampling three
+        interior pages is inexpensive compared with OCR'ing a whole book and
+        avoids requiring a user-facing OCR setting.
+        """
+        if self.psm is not None:
+            self.last_ocr_profile = {"psm": self.psm, "selection": "configured"}
+            return self.psm
+
+        sample_indexes = sorted({
+            max(0, len(document) // 4),
+            max(0, len(document) // 2),
+            max(0, (3 * len(document)) // 4),
+        })
+        scores: dict[int, list[float]] = {3: [], 6: []}
+        for page_index in sample_indexes:
+            page = document[page_index]
+            pix = page.get_pixmap(dpi=180, alpha=False)
+            image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
+            for candidate in scores:
+                try:
+                    data = pytesseract.image_to_data(
+                        image,
+                        lang=self.lang,
+                        config=f"--oem 3 --psm {candidate}",
+                        output_type=Output.DICT,
+                    )
+                    confidences = [
+                        float(confidence)
+                        for text, confidence in zip(data["text"], data["conf"])
+                        if str(text).strip() and float(confidence) >= 0
+                    ]
+                    if len(confidences) >= 8:
+                        scores[candidate].append(sum(confidences) / len(confidences))
+                except Exception:
+                    continue
+
+        averages = {
+            candidate: (sum(values) / len(values) if values else 0.0)
+            for candidate, values in scores.items()
+        }
+        selected = max(averages, key=averages.get)
+        self.last_ocr_profile = {
+            "psm": selected,
+            "selection": "sampled",
+            "psm_3_mean": round(averages[3], 2),
+            "psm_6_mean": round(averages[6], 2),
+        }
+        return selected
 
     def parse(self, file_path: str) -> str:
         """Perform OCR on PDF pages and return extracted text.
@@ -95,6 +149,7 @@ class TesseractParser(BaseParser):
         doc = fitz.open(file_path)
         full_text = []
         try:
+            selected_psm = self._choose_psm(doc)
             for page_num, page in enumerate(doc, 1):
                 pix = page.get_pixmap(dpi=self.dpi)
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
@@ -105,7 +160,7 @@ class TesseractParser(BaseParser):
                     data = pytesseract.image_to_data(
                         img,
                         lang=self.lang,
-                        config=f"--psm {self.psm}",
+                        config=f"--oem 3 --psm {selected_psm}",
                         output_type=Output.DICT,
                     )
                     words = []
