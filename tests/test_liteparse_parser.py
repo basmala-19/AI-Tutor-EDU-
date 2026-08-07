@@ -11,9 +11,14 @@ def test_liteparse_adapter_returns_markdown(monkeypatch, tmp_path):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
         def parse(self, _):
-            return types.SimpleNamespace(text="# Chapter\n\nText")
+            return types.SimpleNamespace(
+                text="# Chapter\n\nText",
+                pages=[types.SimpleNamespace(page_num=1, text_items=[types.SimpleNamespace(text="Page one")])],
+            )
 
     monkeypatch.setitem(sys.modules, "liteparse", types.SimpleNamespace(LiteParse=FakeLiteParse))
     pdf = tmp_path / "book.pdf"
     pdf.write_bytes(b"fake")
-    assert LiteParseParser().parse(str(pdf)) == "# Chapter\n\nText"
+    parser = LiteParseParser()
+    assert parser.parse(str(pdf)) == "# Chapter\n\nText"
+    assert parser.last_page_text == {1: "Page one"}

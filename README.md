@@ -10,7 +10,7 @@ The route is decided from the PDF contents, never from its filename:
 
 | PDF type | Primary | Recovery |
 |---|---|---|
-| Born-digital (usable text layer) | Docling | LlamaParse, then Tesseract |
+| Born-digital (usable text layer) | LiteParse | Docling, LlamaParse, then Tesseract |
 | Scanned / image-only | Tesseract (`ara`, `eng`, or both) | LlamaParse |
 
 `TesseractParser` writes an OCR confidence per page. Elements below 60% are
@@ -82,6 +82,36 @@ streamlit run app.py
 
 The JSON download is the structured `EducationalDocument` to use in the next
 Chunking stage; Markdown is retained for parser review and debugging.
+
+LiteParse exposes page-scoped text to the viewer, so its Markdown panel stays
+synchronised with the selected PDF page even when its combined Markdown export
+does not include explicit page markers.
+
+## Optional PaddleOCR recovery for weak scans
+
+Tesseract remains the default OCR engine.  If PaddleOCR is installed, it is
+loaded only for pages below 60% Tesseract confidence and its text replaces the
+page only when Paddle's confidence is higher.  This avoids a second OCR pass on
+every page of every book.
+
+```powershell
+# First install PaddlePaddle for your CPU/CUDA version from its official guide.
+python -m pip install -r requirements-paddle.txt
+```
+
+## Persistent Streamlit deployment
+
+Colab and Kaggle are temporary notebook sessions; they cannot keep Streamlit
+running permanently.  This repository includes a Docker image for a persistent
+host (for example a VM, Render, Railway, or Hugging Face Space):
+
+```powershell
+docker build -t ai-tutor-parse-studio .
+docker run --rm -p 8501:8501 ai-tutor-parse-studio
+```
+
+Open `http://localhost:8501`.  A free hosted tier may sleep when idle; an
+always-on deployment requires a host/plan that does not sleep.
 
 ### Compare local parsers
 

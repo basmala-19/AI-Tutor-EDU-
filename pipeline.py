@@ -137,6 +137,10 @@ def run_pipeline(
     }
     if hasattr(selected_parser, "last_page_markers"):
         result["page_markers"] = selected_parser.last_page_markers
+    if hasattr(selected_parser, "last_page_text"):
+        # LiteParse page text lets the review UI stay page-scoped even though
+        # its combined Markdown currently has no <!-- page: N --> markers.
+        result["page_text"] = selected_parser.last_page_text
     if hasattr(selected_parser, "last_ocr_profile"):
         result["ocr_profile"] = selected_parser.last_ocr_profile
     if refinement_report is not None:

@@ -40,12 +40,17 @@ class TesseractParser(BaseParser):
         lang: str = "ara+eng",
         dpi: int = 300,
         psm: int | None = None,
+        paddle_fallback: bool = True,
+        paddle_threshold: float = 60.0,
         tesseract_cmd: Optional[str] = None,
     ) -> None:
         self.lang = lang
         self.dpi = dpi
         self.psm = psm
+        self.paddle_fallback = paddle_fallback
+        self.paddle_threshold = paddle_threshold
         self.last_ocr_profile: dict[str, int | float | str] = {}
+        self._paddle = None
 
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
@@ -108,6 +113,22 @@ class TesseractParser(BaseParser):
         }
         return selected
 
+    def _try_paddle(self, image: Image.Image, language: str) -> tuple[str, float] | None:
+        """Return an improved result only when optional PaddleOCR is available."""
+        if not self.paddle_fallback:
+            return None
+        try:
+            if self._paddle is None:
+                from parsers.paddle_ocr import PaddleOCRFallback
+                self._paddle = PaddleOCRFallback(language)
+            return self._paddle.extract(image)
+        except Exception as exc:
+            # Missing optional dependencies and an unavailable GPU must not turn
+            # a recoverable OCR page into a failed document.
+            logger.info("PaddleOCR fallback unavailable: %s", exc)
+            self.paddle_fallback = False
+            return None
+
     def parse(self, file_path: str) -> str:
         """Perform OCR on PDF pages and return extracted text.
 
@@ -150,6 +171,8 @@ class TesseractParser(BaseParser):
         full_text = []
         try:
             selected_psm = self._choose_psm(doc)
+            paddle_pages = 0
+            ocr_language = "ar" if "ara" in requested_languages and "eng" not in requested_languages else "en"
             for page_num, page in enumerate(doc, 1):
                 pix = page.get_pixmap(dpi=self.dpi)
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
@@ -180,6 +203,15 @@ class TesseractParser(BaseParser):
                     mean_confidence = (
                         sum(confidences) / len(confidences) if confidences else 0.0
                     )
+                    if mean_confidence < self.paddle_threshold:
+                        paddle_result = self._try_paddle(img, ocr_language)
+                        if paddle_result is not None:
+                            paddle_text, paddle_confidence = paddle_result
+                            # Never replace usable Tesseract text with a weaker
+                            # second OCR result.  A small margin avoids flapping.
+                            if paddle_text and paddle_confidence > mean_confidence + 2:
+                                page_text, mean_confidence = paddle_text, paddle_confidence
+                                paddle_pages += 1
                     full_text.append(
                         f"<!-- page: {page_num} -->\n"
                         f"<!-- ocr_confidence: {mean_confidence:.2f} -->\n"
@@ -194,4 +226,5 @@ class TesseractParser(BaseParser):
                     )
         finally:
             doc.close()
+        self.last_ocr_profile["paddle_pages"] = paddle_pages
         return "\n\n".join(full_text)
