@@ -1,0 +1,4 @@
+# Optional selective OCR fallback for low-confidence scanned pages.
+# Install the PaddlePaddle wheel appropriate for your CPU/CUDA host first:
+# https://www.paddlepaddle.org.cn/install/quick
+paddleocr>=3.0

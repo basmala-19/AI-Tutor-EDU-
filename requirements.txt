@@ -9,6 +9,9 @@ requests
 # Layer 2: Born-digital parser (downloads ~1 GB model on first run)
 docling
 
+# Fast local spatial parser for born-digital PDFs
+liteparse
+
 # Layer 3: Complex-layout / VLM fallback (free tier, requires API key from cloud.llamaindex.ai)
 # LlamaCloud is called through its REST API; no SDK is required.
 

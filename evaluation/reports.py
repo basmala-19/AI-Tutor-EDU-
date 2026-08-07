@@ -37,11 +37,11 @@ def build_quality_report(
     return {
         "content_faithfulness": content_faithfulness(source_markdown, edoc),
         "table_preservation": table_preservation(source_markdown, edoc),
-        "semantic_formatting": semantic_formatting(edoc),
+        "semantic_formatting": semantic_formatting(edoc, expected_page_count),
         "metadata_completeness": metadata_completeness(edoc),
         "reading_order": reading_order(edoc),
         "ocr_confidence": ocr_confidence_check(edoc),
-        "page_coverage": page_coverage(edoc, expected_page_count),
+        "page_coverage": page_coverage(edoc, expected_page_count, source_markdown),
         "structured_table_rows": structured_table_rows(edoc),
     }
 

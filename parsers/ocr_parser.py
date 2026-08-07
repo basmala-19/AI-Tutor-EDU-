@@ -39,12 +39,18 @@ class TesseractParser(BaseParser):
         self,
         lang: str = "ara+eng",
         dpi: int = 300,
-        psm: int = 6,
+        psm: int | None = None,
+        paddle_fallback: bool = True,
+        paddle_threshold: float = 60.0,
         tesseract_cmd: Optional[str] = None,
     ) -> None:
         self.lang = lang
         self.dpi = dpi
         self.psm = psm
+        self.paddle_fallback = paddle_fallback
+        self.paddle_threshold = paddle_threshold
+        self.last_ocr_profile: dict[str, int | float | str] = {}
+        self._paddle = None
 
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
@@ -53,6 +59,75 @@ class TesseractParser(BaseParser):
                 if os.path.exists(candidate):
                     pytesseract.pytesseract.tesseract_cmd = candidate
                     break
+
+    def _choose_psm(self, document: fitz.Document) -> int:
+        """Choose the page segmentation mode from representative text pages.
+
+        ``PSM 6`` assumes one uniform block and is often poor for textbook
+        pages.  ``PSM 3`` lets Tesseract discover the layout.  Sampling three
+        interior pages is inexpensive compared with OCR'ing a whole book and
+        avoids requiring a user-facing OCR setting.
+        """
+        if self.psm is not None:
+            self.last_ocr_profile = {"psm": self.psm, "selection": "configured"}
+            return self.psm
+
+        sample_indexes = sorted({
+            max(0, len(document) // 4),
+            max(0, len(document) // 2),
+            max(0, (3 * len(document)) // 4),
+        })
+        scores: dict[int, list[float]] = {3: [], 6: []}
+        for page_index in sample_indexes:
+            page = document[page_index]
+            pix = page.get_pixmap(dpi=180, alpha=False)
+            image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
+            for candidate in scores:
+                try:
+                    data = pytesseract.image_to_data(
+                        image,
+                        lang=self.lang,
+                        config=f"--oem 3 --psm {candidate}",
+                        output_type=Output.DICT,
+                    )
+                    confidences = [
+                        float(confidence)
+                        for text, confidence in zip(data["text"], data["conf"])
+                        if str(text).strip() and float(confidence) >= 0
+                    ]
+                    if len(confidences) >= 8:
+                        scores[candidate].append(sum(confidences) / len(confidences))
+                except Exception:
+                    continue
+
+        averages = {
+            candidate: (sum(values) / len(values) if values else 0.0)
+            for candidate, values in scores.items()
+        }
+        selected = max(averages, key=averages.get)
+        self.last_ocr_profile = {
+            "psm": selected,
+            "selection": "sampled",
+            "psm_3_mean": round(averages[3], 2),
+            "psm_6_mean": round(averages[6], 2),
+        }
+        return selected
+
+    def _try_paddle(self, image: Image.Image, language: str) -> tuple[str, float] | None:
+        """Return an improved result only when optional PaddleOCR is available."""
+        if not self.paddle_fallback:
+            return None
+        try:
+            if self._paddle is None:
+                from parsers.paddle_ocr import PaddleOCRFallback
+                self._paddle = PaddleOCRFallback(language)
+            return self._paddle.extract(image)
+        except Exception as exc:
+            # Missing optional dependencies and an unavailable GPU must not turn
+            # a recoverable OCR page into a failed document.
+            logger.info("PaddleOCR fallback unavailable: %s", exc)
+            self.paddle_fallback = False
+            return None
 
     def parse(self, file_path: str) -> str:
         """Perform OCR on PDF pages and return extracted text.
@@ -95,6 +170,9 @@ class TesseractParser(BaseParser):
         doc = fitz.open(file_path)
         full_text = []
         try:
+            selected_psm = self._choose_psm(doc)
+            paddle_pages = 0
+            ocr_language = "ar" if "ara" in requested_languages and "eng" not in requested_languages else "en"
             for page_num, page in enumerate(doc, 1):
                 pix = page.get_pixmap(dpi=self.dpi)
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
@@ -105,7 +183,7 @@ class TesseractParser(BaseParser):
                     data = pytesseract.image_to_data(
                         img,
                         lang=self.lang,
-                        config=f"--psm {self.psm}",
+                        config=f"--oem 3 --psm {selected_psm}",
                         output_type=Output.DICT,
                     )
                     words = []
@@ -125,6 +203,15 @@ class TesseractParser(BaseParser):
                     mean_confidence = (
                         sum(confidences) / len(confidences) if confidences else 0.0
                     )
+                    if mean_confidence < self.paddle_threshold:
+                        paddle_result = self._try_paddle(img, ocr_language)
+                        if paddle_result is not None:
+                            paddle_text, paddle_confidence = paddle_result
+                            # Never replace usable Tesseract text with a weaker
+                            # second OCR result.  A small margin avoids flapping.
+                            if paddle_text and paddle_confidence > mean_confidence + 2:
+                                page_text, mean_confidence = paddle_text, paddle_confidence
+                                paddle_pages += 1
                     full_text.append(
                         f"<!-- page: {page_num} -->\n"
                         f"<!-- ocr_confidence: {mean_confidence:.2f} -->\n"
@@ -139,4 +226,5 @@ class TesseractParser(BaseParser):
                     )
         finally:
             doc.close()
+        self.last_ocr_profile["paddle_pages"] = paddle_pages
         return "\n\n".join(full_text)

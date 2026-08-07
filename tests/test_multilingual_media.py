@@ -1,6 +1,7 @@
 """Regression coverage for Arabic, page markers, and RAG image chunks."""
 from educational.rule_based_parser import parse_markdown_to_education
 from chunking.chunker import chunk_educational_document
+from evaluation.metrics import semantic_formatting
 from schema.models import ElementType
 
 
@@ -15,6 +16,31 @@ def test_real_arabic_unmarked_headings_are_structured():
     assert document.language == "ar"
     assert document.chapters[0].title == ARABIC_CHAPTER
     assert ARABIC_LESSON in [lesson.title for lesson in document.chapters[0].lessons]
+
+
+def test_embedded_arabic_ocr_chapter_heading_is_recovered_without_dropping_text():
+    markdown = (
+        "<!-- page: 5 -->\n<!-- ocr_confidence: 75 -->\n"
+        "123 \u0627\u0644\u0628\u0627\u0628\u0627\u0644\u0623\u0648\u0644 - \u0627\u0644\u0641\u0635\u0644 \u0627\u0644\u0623\u0648\u0644 \u0627\u0644\u062f\u0639\u0627\u0645\u0629 \u0648\u0627\u0644\u062d\u0631\u0643\u0629 \u0641\u064a \u0646\u0647\u0627\u064a\u0629 \u0647\u0630\u0627 \u0627\u0644\u0641\u0635\u0644 \u064a\u062a\u0639\u0631\u0641 \u0627\u0644\u0637\u0627\u0644\u0628.\n"
+    )
+    document = parse_markdown_to_education(markdown, "biology.pdf", "tesseract", "ar")
+    headings = [element for element, _, _ in document.all_elements() if element.type == ElementType.HEADING]
+    paragraphs = [element for element, _, _ in document.all_elements() if element.type == ElementType.PARAGRAPH]
+
+    assert any("\u0627\u0644\u0641\u0635\u0644 \u0627\u0644\u0623\u0648\u0644" in heading.text for heading in headings)
+    assert any("\u064a\u062a\u0639\u0631\u0641 \u0627\u0644\u0637\u0627\u0644\u0628" in paragraph.text for paragraph in paragraphs)
+
+
+def test_long_ocr_document_with_sparse_headings_fails_structure_quality():
+    document = parse_markdown_to_education(
+        "\u0627\u0644\u0641\u0635\u0644 \u0627\u0644\u0623\u0648\u0644\n\n" + "\u0646\u0635 \u062a\u0639\u0644\u064a\u0645\u064a" * 30,
+        "biology.pdf",
+        "tesseract",
+        "ar",
+    )
+    report = semantic_formatting(document, expected_page_count=167)
+    assert report["status"] == "FAIL"
+    assert "expected at least" in report["detail"]
 
 
 def test_markdown_image_keeps_page_and_retrieval_context():

@@ -82,9 +82,17 @@ def table_preservation(source_markdown: str, edoc: EducationalDocument) -> dict:
 
     PASS: detected tables == parsed TABLE elements (exact match).
     """
-    row_count = len(re.findall(r"^\|.*\|\s*$", source_markdown, flags=re.MULTILINE))
+    markdown_tables = 0
+    for line in source_markdown.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) >= 2 and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            markdown_tables += 1
+    html_tables = len(re.findall(r"<table(?:\s|>)", source_markdown, flags=re.IGNORECASE))
+    detected_tables = markdown_tables + html_tables
     # Approximate: each table averages ~3 rows (header + separator + ≥1 data row)
-    detected_tables = max(1, row_count // 3) if row_count else 0
 
     parsed_tables = sum(
         1
@@ -102,7 +110,9 @@ def table_preservation(source_markdown: str, edoc: EducationalDocument) -> dict:
     return {"status": status, "detail": detail}
 
 
-def semantic_formatting(edoc: EducationalDocument) -> dict:
+def semantic_formatting(
+    edoc: EducationalDocument, expected_page_count: int | None = None
+) -> dict:
     """Heading structure integrity check.
 
     PASS: every HEADING element has a non-empty text and a valid level.
@@ -112,11 +122,25 @@ def semantic_formatting(edoc: EducationalDocument) -> dict:
         return {"status": "PASS", "detail": "no headings — nothing to validate"}
 
     bad = [el for el in headings if not el.text or el.level is None]
-    status = "PASS" if not bad else "FAIL"
+    # A long scanned textbook with only a few syntactically-valid headings is
+    # not structurally ready for educational retrieval.  This protects against
+    # falsely passing OCR output such as "2 headings across 167 pages".
+    is_ocr = any(el.metadata.parser == "tesseract" for el in _all_elements(edoc))
+    minimum = (
+        max(3, (expected_page_count + 29) // 30)
+        if is_ocr and expected_page_count and expected_page_count >= 20
+        else 0
+    )
+    too_sparse = minimum and len(headings) < minimum
+    status = "PASS" if not bad and not too_sparse else "FAIL"
     detail = (
         f"all {len(headings)} headings have valid text and level"
-        if not bad
-        else f"{len(bad)}/{len(headings)} headings missing text or level"
+        if not bad and not too_sparse
+        else (
+            f"only {len(headings)} headings recovered across {expected_page_count} OCR pages; expected at least {minimum}"
+            if too_sparse
+            else f"{len(bad)}/{len(headings)} headings missing text or level"
+        )
     )
     return {"status": status, "detail": detail}
 
@@ -189,10 +213,19 @@ def ocr_confidence_check(edoc: EducationalDocument, threshold: float = 0.60) -> 
     return {"status": status, "detail": detail}
 
 
-def page_coverage(edoc: EducationalDocument, expected_page_count: int | None) -> dict:
+def page_coverage(
+    edoc: EducationalDocument,
+    expected_page_count: int | None,
+    source_markdown: str | None = None,
+) -> dict:
     """Detect pages silently lost between extraction and structured output."""
     if not expected_page_count:
         return {"status": "PASS", "detail": "source page count unavailable"}
+    if edoc.parser == "liteparse" and source_markdown is not None and "<!-- page:" not in source_markdown:
+        return {
+            "status": "FAIL",
+            "detail": "page provenance unavailable: LiteParse Markdown has no page markers; coverage cannot be measured",
+        }
     present = {el.metadata.page for el in _all_elements(edoc) if el.metadata.page > 0}
     missing = [page for page in range(1, expected_page_count + 1) if page not in present]
     status = "PASS" if not missing else "FAIL"

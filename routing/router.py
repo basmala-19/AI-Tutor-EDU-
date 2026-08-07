@@ -17,10 +17,27 @@ from langdetect.lang_detect_exception import LangDetectException
 from parsers.base import BaseParser
 from parsers.docling_parser import DoclingParser
 from parsers.llama_parser import LlamaParser
+from parsers.liteparse_parser import LiteParseParser
 from parsers.ocr_parser import TesseractParser
 from routing.probe import probe_document, ProbeResult
 
 DetectorFactory.seed = 0
+
+
+def detect_language_from_text(text: str) -> str:
+    """Infer Arabic/English from extracted text when PDF metadata is empty."""
+    arabic_char_count = sum(1 for char in text if "\u0600" <= char <= "\u06FF")
+    latin_char_count = sum(1 for char in text if char.isascii() and char.isalpha())
+    total_char_count = max(len(text.strip()), 1)
+    arabic_ratio = arabic_char_count / total_char_count
+    latin_ratio = latin_char_count / total_char_count
+    if arabic_ratio > 0.15 and latin_ratio > 0.15:
+        return "mixed"
+    if arabic_ratio > 0.15:
+        return "ar"
+    if latin_ratio > 0.15:
+        return "en"
+    return "unknown"
 
 
 def detect_language_from_content(file_path: str, sample_pages: int = 5) -> str:
@@ -107,6 +124,7 @@ class ParserRouter:
     def __init__(self) -> None:
         self._registry: dict[str, BaseParser] = {
             "docling": DoclingParser(),
+            "liteparse": LiteParseParser(),
             "tesseract": TesseractParser(lang="ara+eng"),
             "ocr_parser": TesseractParser(lang="ara+eng"),
             "llamaparse": LlamaParser(language="auto"),
@@ -144,6 +162,7 @@ class ParserRouter:
         llama_language = language if language in {"ar", "en"} else "auto"
         if probe.is_born_digital:
             return [
+                self._registry["liteparse"],
                 self._registry["docling"],
                 self.get_llama_parser(llama_language),
                 TesseractParser(lang=ocr_language),

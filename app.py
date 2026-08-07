@@ -25,15 +25,39 @@ def _save_upload(uploaded_file) -> Path:
     return path
 
 
-def _markdown_for_page(markdown: str, page: int) -> str:
+def _markdown_for_page(markdown: str, page: int) -> str | None:
     markers = list(PAGE_MARKER_RE.finditer(markdown))
     if not markers:
-        return markdown
+        return None
     for index, match in enumerate(markers):
         if int(match.group(1)) == page:
             end = markers[index + 1].start() if index + 1 < len(markers) else len(markdown)
             return markdown[match.end():end].strip()
     return "_No Markdown segment was emitted for this page._"
+
+
+def _elements_as_markdown(document: dict, page: int) -> str:
+    """Render only page-scoped structured elements when raw Markdown has no markers."""
+    parts: list[str] = []
+    for element in _elements_for_page(document, page):
+        text = (element.get("text") or "").strip()
+        if not text:
+            continue
+        if element.get("type") == "heading":
+            parts.append(f"{'#' * min(element.get('level') or 2, 6)} {text}")
+        elif element.get("type") == "image":
+            parts.append(text)
+        else:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _liteparse_page_text(page_text: dict | None, page: int) -> str | None:
+    """Return LiteParse's page-scoped text with JSON's string/int key support."""
+    if not page_text:
+        return None
+    text = page_text.get(page) or page_text.get(str(page))
+    return str(text).strip() if text else None
 
 
 def _elements_for_page(document: dict, page: int) -> list[dict]:
@@ -63,19 +87,11 @@ def _render_page(pdf_path: str, page_number: int) -> bytes:
 
 st.set_page_config(page_title="AI Tutor Parse Studio", page_icon="📘", layout="wide")
 st.title("📘 AI Tutor Parse Studio")
-st.caption("Local Docling / Tesseract parser viewer — no cloud API required")
 
 with st.sidebar:
     st.header("Document")
     uploaded = st.file_uploader("Upload a PDF textbook", type=["pdf"])
-    st.caption("Auto mode chooses local Qwen-VL for image-dense digital books; otherwise Docling/Tesseract is used.")
-    parsing_mode = "auto"
-    include_chunks = st.toggle("Generate chunks", value=False)
-    refine_with_qwen = st.toggle("Refine flagged elements with local Qwen-VL", value=False)
-    qwen_max_elements = st.slider("Maximum Qwen refinements", 1, 50, 10, disabled=not refine_with_qwen)
-    run = st.button("Parse document", type="primary", use_container_width=True)
-    st.divider()
-    st.caption("JSON is the source of truth for Chunking. Markdown is a debug/review view.")
+    run = st.button("Parse document", type="primary", use_container_width=True, disabled=uploaded is None)
 
 if run:
     if uploaded is None:
@@ -86,11 +102,9 @@ if run:
             try:
                 st.session_state["parse_result"] = run_pipeline(
                     str(file_path),
-                    include_chunks=include_chunks,
+                    include_chunks=False,
                     include_markdown=True,
-                    refine_with_qwen=refine_with_qwen,
-                    qwen_max_elements=qwen_max_elements,
-                    parsing_mode=parsing_mode,
+                    parsing_mode="auto",
                 )
                 st.session_state["pdf_path"] = str(file_path)
                 st.session_state["pdf_name"] = uploaded.name
@@ -127,14 +141,6 @@ if result and pdf_path:
             mime="text/markdown",
             use_container_width=True,
         )
-        if "chunks" in result:
-            st.download_button(
-                "Download chunks JSON",
-                data=json.dumps(result["chunks"], ensure_ascii=False, indent=2),
-                file_name=f"{Path(st.session_state['pdf_name']).stem}.chunks.json",
-                mime="application/json",
-                use_container_width=True,
-            )
 
     left, right = st.columns([1.08, 1], gap="large")
     with left:
@@ -145,7 +151,17 @@ if result and pdf_path:
         st.subheader("Parsed result")
         markdown_tab, json_tab, quality_tab = st.tabs(["Markdown", "JSON", "Quality"])
         with markdown_tab:
-            st.markdown(_markdown_for_page(markdown, int(page)))
+            page_markdown = _markdown_for_page(markdown, int(page))
+            if page_markdown is not None:
+                st.markdown(page_markdown)
+            else:
+                liteparse_text = _liteparse_page_text(result.get("page_text"), int(page))
+                fallback = _elements_as_markdown(document, int(page))
+                if liteparse_text:
+                    st.markdown(liteparse_text)
+                else:
+                    st.caption("This parser did not emit raw page markers. Showing only structured elements associated with this page.")
+                    st.markdown(fallback or "_No page-scoped content is available for this page._")
         with json_tab:
             page_json = {"page": int(page), "elements": _elements_for_page(document, int(page))}
             st.json(page_json, expanded=False)
@@ -154,15 +170,5 @@ if result and pdf_path:
                 icon = "✅" if value["status"] == "PASS" else "⚠️"
                 st.write(f"{icon} **{metric}** — {value['detail']}")
 
-    with st.expander("Parser attempts and document metadata"):
-        st.json(
-            {
-                "parser_attempts": result["parser_attempts"],
-                "probe": probe,
-                "chunk_count": result.get("chunk_count"),
-                "refinement_report": result.get("refinement_report"),
-            },
-            expanded=False,
-        )
 else:
     st.info("Upload a PDF then choose **Parse document**. The page selector keeps the PDF, Markdown, and JSON view synchronized.")
